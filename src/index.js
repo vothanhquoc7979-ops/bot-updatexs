@@ -1,45 +1,44 @@
 /**
- * index.js — Entry point: khởi động Express + Telegram Bot + Auto-scheduler
+ * index.js — Entry point: Express server + Bot + Auto-scheduler
  */
 'use strict';
 
 require('dotenv').config();
 
-const express = require('express');
-const { bot, tgLog } = require('./bot');
-const { startAutoSchedule } = require('./scheduler');
+const express    = require('express');
+const logger     = require('./logger');
+const storage    = require('./storage');
+const botManager = require('./bot-manager');
+const ui         = require('./ui');
 
 const PORT = process.env.PORT || 3000;
 const app  = express();
-app.use(express.json());
 
-// ─── Health check endpoint (Railway dùng để check app còn sống) ─
-app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'xoso-live-bot', time: new Date().toISOString() });
-});
+// ── Mount Web Dashboard ──────────────────────────────────
+app.use(ui);
 
-// ─── Khởi động Bot và Auto-scheduler ─────────────────────
+// ── Health check ─────────────────────────────────────────
+app.get('/health', (_, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+
+// ── Khởi động ────────────────────────────────────────────
 async function main() {
-  console.log('[Main] Khởi động KQXS Live Bot...');
+  logger.log('🚀 Khởi động KQXS Live Bot...');
+  logger.log(`🌐 Dashboard: http://localhost:${PORT}`);
 
-  // Bật auto-schedule theo giờ xổ VN
-  startAutoSchedule(tgLog);
+  // Khởi động Telegram bot (nếu đã có token)
+  await botManager.start();
 
-  // Launch bot (long polling — phù hợp Railway)
-  await bot.launch();
-  console.log('[Main] Telegram Bot đang chạy (long polling)');
-
-  // Keep Express alive (Railway cần HTTP server)
+  // HTTP server (Railway cần để keepalive + Web UI)
   app.listen(PORT, () => {
-    console.log(`[Main] HTTP server: http://localhost:${PORT}`);
+    logger.log(`✅ HTTP server đang chạy trên port ${PORT}`);
   });
 }
 
 main().catch(err => {
-  console.error('[Main] Lỗi khởi động:', err);
+  logger.log(`❌ Lỗi khởi động: ${err.message}`);
   process.exit(1);
 });
 
-// ─── Graceful shutdown ────────────────────────────────────
-process.once('SIGINT',  () => { bot.stop('SIGINT');  process.exit(0); });
-process.once('SIGTERM', () => { bot.stop('SIGTERM'); process.exit(0); });
+// ── Graceful shutdown ────────────────────────────────────
+process.once('SIGINT',  () => { logger.log('SIGINT — tắt bot'); process.exit(0); });
+process.once('SIGTERM', () => { logger.log('SIGTERM — tắt bot'); process.exit(0); });
