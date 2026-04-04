@@ -132,14 +132,21 @@ function getStatus() {
 
 // ─── Auto-schedule: check mỗi 1 phút ─────────────────────
 function startAutoSchedule(onLog) {
-  onLog('[Scheduler] Auto-schedule bật: sẽ tự chạy theo giờ xổ VN');
+  onLog('[Scheduler] Auto-schedule: Sẽ tự động get số khi đến giờ quay (nếu config bật)');
   setInterval(() => {
+    // Luôn load cấu hình mới nhất
+    const storage = require('./storage');
+    const autoScheduleEnabled = storage.load().auto_schedule;
+    
+    // Nếu bị tắt trên dashboard thì bỏ qua
+    if (autoScheduleEnabled === false) return;
+
     for (const region of ['mn', 'mt', 'mb']) {
       const inSchedule = isInSchedule(region);
       const running    = state[region]?.running;
 
       if (inSchedule && !running) {
-        onLog(`[Scheduler] Đến giờ xổ ${REGION_NAMES[region]} → tự start`);
+        onLog(`[Scheduler] 🕒 Đã đến giờ xổ ${REGION_NAMES[region]} → tự động kích hoạt bot!`);
         start(region, onLog, false);
       }
     }

@@ -13,11 +13,11 @@ module.exports = {
     mt: `${BASE_URL}/str_kqmt/${API_HASH}`,
   },
 
-  // Lịch xổ (giờ VN, format HH:MM)
+  // Lịch xổ (giờ VN, format HH:MM) bắt đầu quét sớm 15 phút trước giờ xổ thực
   SCHEDULE: {
-    mn: { start: '16:00', end: '17:30' },
-    mt: { start: '16:00', end: '17:30' },
-    mb: { start: '18:30', end: '19:15' },
+    mn: { start: '16:00', end: '17:00' },
+    mt: { start: '17:00', end: '18:00' },
+    mb: { start: '18:00', end: '19:00' },
   },
 
   // Interval poll khi đang trong giờ xổ (ms)

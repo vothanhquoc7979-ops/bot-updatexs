@@ -32,6 +32,10 @@ async function main() {
   app.listen(PORT, () => {
     logger.log(`✅ HTTP server đang chạy trên port ${PORT}`);
   });
+
+  // Bật chế độ tự động check giờ xổ (nếu config auto_schedule đang bật)
+  const scheduler = require('./scheduler');
+  scheduler.startAutoSchedule(logger.log);
 }
 
 main().catch(err => {
