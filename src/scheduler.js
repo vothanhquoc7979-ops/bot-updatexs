@@ -4,7 +4,7 @@
 'use strict';
 
 const { fetchRegion, isRegionComplete } = require('./fetcher');
-const { pushToWeb } = require('./pusher');
+const { pushToWeb, resolveDrawDate }     = require('./pusher');
 const { SCHEDULE, POLL_INTERVAL_ACTIVE, POLL_INTERVAL_IDLE, REGION_NAMES } = require('./config');
 
 // State: region → { timer, lastData, running, manual }
@@ -50,21 +50,25 @@ async function pollOnce(region, onLog) {
     if (hasNewData(old, results)) {
       state[region].lastData = results;
 
-      // Đếm số tỉnh đã xong
+      // Xác định ngày đúng (hôm nay hay hôm qua) theo giờ xổ
+      const drawDate = resolveDrawDate(region);
       const doneCount = results.filter(r => r.done).length;
       const total     = results.length;
-      onLog(`[${region.toUpperCase()}] Cập nhật mới! ${doneCount}/${total} tỉnh xong — push sang web...`);
+      onLog(`[${region.toUpperCase()}] 📅 Draw date: ${drawDate} | Cập nhật mới! ${doneCount}/${total} tỉnh xong — push sang web...`);
 
       const ok = await pushToWeb(region, results);
-      onLog(ok ? `[${region.toUpperCase()}] ✅ Push thành công` : `[${region.toUpperCase()}] ⚠️ Push thất bại`);
+      onLog(ok
+        ? `[${region.toUpperCase()}] ✅ Push OK → ${drawDate}`
+        : `[${region.toUpperCase()}] ⚠️ Push thất bại`
+      );
 
       // Kiểm tra xổ xong hoàn toàn
       if (isRegionComplete(results)) {
-        onLog(`[${region.toUpperCase()}] 🏁 ${REGION_NAMES[region]} đã xổ xong!`);
+        onLog(`[${region.toUpperCase()}] 🏁 ${REGION_NAMES[region]} đã xổ xong ngày ${drawDate}!`);
         stop(region, onLog);
       }
     } else {
-      onLog(`[${region.toUpperCase()}] Không có số mới`);
+      onLog(`[${region.toUpperCase()}] Không có số mới (${resolveDrawDate(region)})`);
     }
   } catch (e) {
     onLog(`[${region.toUpperCase()}] ❌ Lỗi poll: ${e.message}`);
