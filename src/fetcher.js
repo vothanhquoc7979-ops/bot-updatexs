@@ -135,7 +135,7 @@ async function fetchRegion(region) {
   if (!url) throw new Error(`Unknown region: ${region}`);
   
   // Thêm tham số timestamp để báo Cập Nhật Mới theo format API mới
-  url = `${url}?t=${Date.now()}`;
+  url = `${url}t=${Date.now()}`;
 
   const raw = await httpGet(url);
   if (!raw || raw.trim() === '') return null;
