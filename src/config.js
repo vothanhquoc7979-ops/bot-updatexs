@@ -3,14 +3,13 @@
  */
 'use strict';
 
-const API_HASH = '612affdcd84288de1cc87429738c4b34';
 const BASE_URL = 'https://s2.kqxs.tube/str/ttkq';
 
 module.exports = {
   API: {
-    mb: `${BASE_URL}/str_kqmb/${API_HASH}`,
-    mn: `${BASE_URL}/str_kqmn/${API_HASH}`,
-    mt: `${BASE_URL}/str_kqmt/${API_HASH}`,
+    mb: `${BASE_URL}/str_kqmb/`,
+    mn: `${BASE_URL}/str_kqmn/`,
+    mt: `${BASE_URL}/str_kqmt/`,
   },
 
   // Lịch xổ (giờ VN, format HH:MM) bắt đầu quét sớm 15 phút trước giờ xổ thực

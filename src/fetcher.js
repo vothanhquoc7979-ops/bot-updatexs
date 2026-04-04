@@ -131,8 +131,11 @@ function parseMNMT(raw, region) {
 
 // ─── Public: fetch và parse 1 region ───────────────────────
 async function fetchRegion(region) {
-  const url = API[region];
+  let url = API[region];
   if (!url) throw new Error(`Unknown region: ${region}`);
+  
+  // Thêm tham số timestamp để báo Cập Nhật Mới theo format API mới
+  url = `${url}?t=${Date.now()}`;
 
   const raw = await httpGet(url);
   if (!raw || raw.trim() === '') return null;
