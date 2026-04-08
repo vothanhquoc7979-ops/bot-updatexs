@@ -6,20 +6,98 @@
 require('dotenv').config();
 
 const express    = require('express');
+const session    = require('express-session');
 const logger     = require('./logger');
 const storage    = require('./storage');
 const botManager = require('./bot-manager');
 const ui         = require('./ui');
-const forumSSE   = require('./forum-sse');
 
 const PORT = process.env.PORT || 3000;
 const app  = express();
 
-// ── Mount Web Dashboard ──────────────────────────────────
+// ── Shared MySQL pool (dùng chung cho forum-SSE và crawl) ──
+let mysqlPool = null;
+
+function getMySQLPool() {
+  if (!mysqlPool && process.env.MYSQL_HOST) {
+    mysqlPool = require('mysql2/promise').createPool({
+      host:     process.env.MYSQL_HOST,
+      port:     parseInt(process.env.MYSQL_PORT || '3306'),
+      user:     process.env.MYSQL_USER,
+      password: process.env.MYSQL_PASSWORD,
+      database: process.env.MYSQL_DATABASE,
+      waitForConnections: true,
+      connectionLimit: 5,
+      queueLimit: 0,
+    });
+    logger.log('✅ MySQL pool đã khởi tạo');
+  }
+  return mysqlPool;
+}
+
+// ── Session middleware (cho bot dashboard) ───────────────
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'xoso-bot-secret-2024',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 24 * 60 * 60 * 1000 },
+}));
+
+// ── Body parser ───────────────────────────────────────────
+app.use(express.json());
+
+// ── Mount Web Dashboard (UI + auth routes) ─────────────
 app.use(ui);
 
 // ── Health check ─────────────────────────────────────────
 app.get('/health', (_, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+
+// ── API: Crawl Vietlott ─────────────────────────────────
+app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
+  const pool = getMySQLPool();
+  if (!pool) {
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình MySQL (MYSQL_HOST env)' });
+  }
+
+  const { games = [], from, to, force = false } = req.body;
+
+  if (!games.length || !from || !to) {
+    return res.status(400).json({ ok: false, msg: 'Thiếu games / from / to' });
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return res.status(400).json({ ok: false, msg: 'Ngày không hợp lệ (định dạng YYYY-MM-DD)' });
+  }
+
+  const { crawl } = require('./crawler-vietlott');
+
+  const startTime = Date.now();
+  const collectedLogs = [];
+
+  try {
+    const result = await crawl({
+      games,
+      from,
+      to,
+      db: pool,
+      force,
+      onLog: (msg) => {
+        collectedLogs.push({ ts: new Date().toISOString(), msg });
+        logger.log(msg);
+      },
+    });
+
+    res.json({
+      ok: true,
+      saved: result.saved,
+      errors: result.errors,
+      elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
+      logs: collectedLogs,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, msg: e.message, logs: collectedLogs });
+  }
+});
 
 // ── Khởi động ────────────────────────────────────────────
 async function main() {
@@ -32,8 +110,6 @@ async function main() {
   // HTTP server (Railway cần để keepalive + Web UI)
   const server = app.listen(PORT, () => {
     logger.log(`✅ HTTP server đang chạy trên port ${PORT}`);
-
-    // Khởi động SSE endpoint cho forum real-time
     logger.log(`📡 Forum SSE: http://localhost:${PORT}/forum-sse`);
   });
 
@@ -42,32 +118,25 @@ async function main() {
     const token = req.query.token || '';
     if (!token) return res.status(401).end('Missing token');
 
-    // Validate token against MySQL
     try {
-      const db = await import('mysql2/promise').then(m => m.createPool({
-        host:     process.env.MYSQL_HOST,
-        user:     process.env.MYSQL_USER,
-        password: process.env.MYSQL_PASSWORD,
-        database: process.env.MYSQL_DATABASE,
-      }).getConnection());
-
-      const [rows] = await db.execute(
+      const pool = getMySQLPool();
+      if (!pool) return res.status(500).end('Server error');
+      const [rows] = await pool.execute(
         'SELECT 1 FROM forum_sessions WHERE session_token = ? AND expires_at > NOW() LIMIT 1',
         [token]
       );
-      await db.end();
       if (rows.length === 0) return res.status(401).end('Invalid token');
     } catch (_) {
       return res.status(500).end('Server error');
     }
 
+    const forumSSE = require('./forum-sse');
     const clientId = forumSSE.addClient(res);
     req.on('close', () => forumSSE.removeClient(clientId));
     req.on('end',   () => forumSSE.removeClient(clientId));
   });
 
   // ── Endpoint: PHP gọi khi có tin nhắn forum mới ──────────
-  app.use(express.json());
   app.post('/forum/push', (req, res) => {
     const secret = req.headers['x-bot-secret'];
     const valid  = (process.env.PHP_PUSH_SECRET || '').trim()
@@ -82,6 +151,7 @@ async function main() {
       return res.status(400).json({ ok: false, error: 'Missing type or message' });
     }
 
+    const forumSSE = require('./forum-sse');
     forumSSE.push('forum_message', { type, message, ts: Date.now() });
     res.json({ ok: true, clients: forumSSE.getClientCount() });
   });
@@ -96,6 +166,6 @@ main().catch(err => {
   process.exit(1);
 });
 
-// ── Graceful shutdown ────────────────────────────────────
+// ── Graceful shutdown ───────────────────────────────────
 process.once('SIGINT',  () => { logger.log('SIGINT — tắt bot'); process.exit(0); });
 process.once('SIGTERM', () => { logger.log('SIGTERM — tắt bot'); process.exit(0); });

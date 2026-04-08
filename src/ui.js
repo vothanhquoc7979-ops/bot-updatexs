@@ -65,6 +65,12 @@ ${extraHead}
   .btn-green{background:var(--green);color:#fff}
   .btn-gray{background:#2c2f45;color:var(--text)}
   .btn-sm{padding:6px 12px;font-size:12px}
+  .tab-btn{background:transparent;border:none;border-bottom:2px solid transparent;padding:10px 18px;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;transition:color .2s,border-color .2s;margin-bottom:-2px}
+  .tab-btn:hover{color:var(--text)}
+  .tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .game-check{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:8px 12px;background:#111320;border:1px solid var(--border);border-radius:8px;transition:border-color .2s}
+  .game-check:hover{border-color:var(--accent2)}
+  .game-check input[type=checkbox]{accent-color:var(--accent2);width:16px;height:16px}
   .status-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
   .status-row:last-child{border-bottom:none;padding-bottom:0}
   .region-name{font-weight:600;font-size:14px}
@@ -213,6 +219,15 @@ router.get('/', requireAuth, (req, res) => {
 
     <div class="container">
 
+      <!-- Tab navigation -->
+      <div style="display:flex;gap:0;margin-bottom:20px;border-bottom:2px solid var(--border)">
+        <button class="tab-btn active" id="tab-dashboard" onclick="showTab('dashboard')">📊 Dashboard</button>
+        <button class="tab-btn" id="tab-crawl" onclick="showTab('crawl')">🕷️ Crawl Vietlott</button>
+      </div>
+
+      <!-- ═══════════════ TAB: DASHBOARD ═══════════════ -->
+      <div id="panel-dashboard">
+
       <!-- Thông báo -->
       ${!hasToken ? '<div class="alert alert-err">⚠️ Chưa cài token Telegram! Nhập token ở phần Cấu hình bên dưới.</div>' : ''}
       <div id="flash" style="display:none" class="alert alert-ok"></div>
@@ -337,9 +352,84 @@ router.get('/', requireAuth, (req, res) => {
         </div>
       </div>
 
+      </div><!-- /panel-dashboard -->
+
+      <!-- ═══════════════ TAB: CRAWL VIETLOTT ═══════════════ -->
+      <div id="panel-crawl" style="display:none">
+
+        <div class="card">
+          <div class="card-hd">🎯 Chọn game Vietlott cần crawl</div>
+          <div class="card-body">
+            <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+              <button class="btn btn-blue btn-sm" onclick="toggleAllGames(true)">✅ Chọn tất cả</button>
+              <button class="btn btn-gray btn-sm" onclick="toggleAllGames(false)">❌ Bỏ chọn tất cả</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:14px">
+              <label class="game-check"><input type="checkbox" class="game-cb" value="mega"> 🎰 Mega 6/45</label>
+              <label class="game-check"><input type="checkbox" class="game-cb" value="power"> ⚡ Power 6/55</label>
+              <label class="game-check"><input type="checkbox" class="game-cb" value="max3d"> 🎲 Max 3D</label>
+              <label class="game-check"><input type="checkbox" class="game-cb" value="max3dpro"> 🎲 Max 3D Pro</label>
+              <label class="game-check"><input type="checkbox" class="game-cb" value="keno"> 🔢 Keno</label>
+            </div>
+
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+              <div class="form-group" style="margin:0">
+                <label>Từ ngày</label>
+                <input type="date" id="crawl-from" class="form-control" value="${new Date().toISOString().slice(0,10)}">
+              </div>
+              <div class="form-group" style="margin:0">
+                <label>Đến ngày</label>
+                <input type="date" id="crawl-to" class="form-control" value="${new Date().toISOString().slice(0,10)}">
+              </div>
+              <div class="form-group" style="margin:0">
+                <label>&nbsp;</label>
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;white-space:nowrap">
+                  <input type="checkbox" id="crawl-force"> 🔄 Xóa rồi cào lại
+                </label>
+              </div>
+              <button class="btn btn-primary" id="btn-crawl" onclick="runCrawl()">🚀 Bắt đầu crawl</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Progress -->
+        <div class="card" style="margin-top:16px">
+          <div class="card-hd">📊 Tiến trình</div>
+          <div class="card-body">
+            <div id="crawl-progress" style="display:none">
+              <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
+                <span id="prog-label">Đang crawl...</span>
+                <span id="prog-count">0 / 0</span>
+              </div>
+              <div style="background:#111320;border-radius:6px;height:8px;overflow:hidden">
+                <div id="prog-bar" style="background:linear-gradient(90deg,#e74c3c,#f39c12);height:100%;width:0%;transition:width .3s;border-radius:6px"></div>
+              </div>
+            </div>
+            <div id="crawl-summary" style="display:none;margin-top:10px;font-size:14px;font-weight:600"></div>
+          </div>
+        </div>
+
+        <!-- Log -->
+        <div class="card" style="margin-top:16px">
+          <div class="card-hd">📋 Log kết quả</div>
+          <div class="card-body" style="padding:12px">
+            <div id="crawl-logbox"><span style="color:var(--muted)">Chọn game → khoảng ngày → bấm Bắt đầu crawl...</span></div>
+          </div>
+        </div>
+
+      </div><!-- /panel-crawl -->
+
     </div><!-- /container -->
 
     <script>
+    // ── Tab switching ─────────────────────────────────────
+    function showTab(name) {
+      document.getElementById('panel-dashboard').style.display = name === 'dashboard' ? '' : 'none';
+      document.getElementById('panel-crawl').style.display     = name === 'crawl'     ? '' : 'none';
+      document.getElementById('tab-dashboard').className = 'tab-btn' + (name === 'dashboard' ? ' active' : '');
+      document.getElementById('tab-crawl').className     = 'tab-btn' + (name === 'crawl'     ? ' active' : '');
+    }
+
     // ── Poll status mỗi 5s ──────────────────────────────
     async function fetchStatus() {
       try {
@@ -351,7 +441,6 @@ router.get('/', requireAuth, (req, res) => {
     }
 
     function updateStatus(statusText) {
-      // statusText = multiline string từ getStatus()
       const lines = statusText.split('\\n');
       const map = { mn:'s-mn', mt:'s-mt', mb:'s-mb' };
       const regionKeys = Object.keys(map);
@@ -376,7 +465,6 @@ router.get('/', requireAuth, (req, res) => {
     function updateLogs(logs) {
       const box = document.getElementById('logbox');
       const atBottom = box.scrollHeight - box.scrollTop <= box.clientHeight + 40;
-
       box.innerHTML = logs.map(l => {
         let cls = 'log-info';
         if (l.msg.includes('✅') || l.msg.includes('OK')) cls = 'log-ok';
@@ -384,7 +472,6 @@ router.get('/', requireAuth, (req, res) => {
         else if (l.msg.includes('⚠️')) cls = 'log-warn';
         return \`<div class="\${cls}"><span style="color:#3d4566">\${l.ts}</span> \${escHtml(l.msg)}</div>\`;
       }).join('');
-
       if (atBottom) box.scrollTop = box.scrollHeight;
     }
 
@@ -405,7 +492,7 @@ router.get('/', requireAuth, (req, res) => {
       document.getElementById('logbox').innerHTML = '';
     }
 
-    // ── Flash message ───────────────────────────────────
+    // ── Flash message ────────────────────────────────────
     function flash(msg, ok = true) {
       const el = document.getElementById('flash');
       el.textContent = (ok ? '✅ ' : '❌ ') + msg;
@@ -431,6 +518,77 @@ router.get('/', requireAuth, (req, res) => {
       flash(d.ok ? 'Đã lưu cấu hình! Bot đang restart...' : (d.msg || 'Lỗi'), d.ok);
     });
 
+    // ── Crawl Vietlott ────────────────────────────────────
+    function toggleAllGames(checked) {
+      document.querySelectorAll('.game-cb').forEach(cb => { cb.checked = checked; });
+    }
+
+    function appendCrawlLog(msg, color = '#e8e8f0') {
+      const box = document.getElementById('crawl-logbox');
+      const line = document.createElement('div');
+      line.style.color = color;
+      line.textContent = '[' + new Date().toLocaleTimeString('vi-VN') + '] ' + msg;
+      box.appendChild(line);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    async function runCrawl() {
+      const checked = Array.from(document.querySelectorAll('.game-cb:checked')).map(cb => cb.value);
+      const from    = document.getElementById('crawl-from').value;
+      const to      = document.getElementById('crawl-to').value;
+      const force   = document.getElementById('crawl-force').checked;
+
+      if (!checked.length) { alert('Vui lòng chọn ít nhất 1 game!'); return; }
+      if (!from || !to)     { alert('Vui lòng chọn khoảng ngày!');   return; }
+
+      const btn = document.getElementById('btn-crawl');
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang crawl...';
+
+      const box = document.getElementById('crawl-logbox');
+      box.innerHTML = '';
+
+      const progPanel = document.getElementById('crawl-progress');
+      const progBar  = document.getElementById('prog-bar');
+      const progLabel = document.getElementById('prog-label');
+      const progCount = document.getElementById('prog-count');
+      const summary   = document.getElementById('crawl-summary');
+
+      progPanel.style.display = '';
+      summary.style.display   = 'none';
+
+      appendCrawlLog('🚀 Bắt đầu crawl ' + checked.join(', ') + ' từ ' + from + ' → ' + to, '#ffd700');
+
+      try {
+        const res = await fetch('/api/crawler/vietlott', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ games: checked, from, to, force }),
+        });
+
+        const data = await res.json();
+
+        if (data.ok) {
+          progBar.style.width = '100%';
+          progCount.textContent = data.saved + ' bản ghi';
+          progLabel.textContent = '✅ Hoàn tất!';
+
+          appendCrawlLog('✅ Hoàn tất! Đã lưu ' + data.saved + ' bản ghi, ' + data.errors + ' lỗi | Thời gian: ' + data.elapsed, '#4caf50');
+
+          summary.style.display = '';
+          summary.innerHTML = '<span style="color:#4caf50">✅ Lưu ' + data.saved + ' bản ghi</span> · <span style="color:#ef5350">❌ ' + data.errors + ' lỗi</span> · ⏱ ' + data.elapsed;
+        } else {
+          appendCrawlLog('❌ Lỗi: ' + data.msg, '#ef5350');
+          progLabel.textContent = '❌ Lỗi';
+        }
+      } catch (e) {
+        appendCrawlLog('❌ Lỗi kết nối: ' + e.message, '#ef5350');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🚀 Bắt đầu crawl';
+      }
+    }
+
     // ── Start polling ────────────────────────────────────
     fetchStatus();
     setInterval(fetchStatus, 5000);
@@ -439,3 +597,4 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 module.exports = router;
+module.exports.requireAuth = requireAuth;
