@@ -378,7 +378,7 @@ router.get('/', requireAuth, (req, res) => {
               <div class="grid" style="grid-template-columns:1fr 1fr">
                 <div class="form-group">
                   <label>MySQL Host</label>
-                  <input type="text" id="m-host" placeholder="localhost" value="${cfg.mysql_host || ''}">
+                  <input type="text" id="m-host" placeholder="vd: srv123.hstgr.io (KHÔNG dùng localhost)" value="${cfg.mysql_host || ''}">
                 </div>
                 <div class="form-group">
                   <label>MySQL Port <span style="color:var(--muted);font-weight:400">(mặc định 3306)</span></label>
@@ -397,6 +397,11 @@ router.get('/', requireAuth, (req, res) => {
                 <label>MySQL Database</label>
                 <input type="text" id="m-db" placeholder="your_db_name" value="${cfg.mysql_database || ''}">
               </div>
+              <p style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:12px">
+                Bot chạy trên <strong>Railway</strong> — <code>localhost</code> là máy Railway, <strong>không phải</strong> máy Hostinger.
+                Trong hPanel → <strong>Websites → Databases</strong> (hoặc MySQL Remote), copy <strong>Hostname</strong> thật (vd. <code>srv….hstgr.io</code>).
+                Bật <strong>Remote MySQL</strong> và cho phép host <code>%</code> (hoặc IP egress của Railway) nếu host chặn kết nối ngoài.
+              </p>
               <div style="display:flex;gap:10px;align-items:center">
                 <button type="button" class="btn btn-blue" onclick="testMysql()">🔗 Test kết nối</button>
                 <button type="submit" class="btn btn-primary">💾 Lưu MySQL</button>

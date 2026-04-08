@@ -167,7 +167,13 @@ app.post('/api/mysql-check', ui.requireAuth, express.json(), async (req, res) =>
     await testPool.end();
     res.json({ ok: true });
   } catch (e) {
-    res.json({ ok: false, msg: e.message });
+    const host = (mysql_host || '').trim().toLowerCase();
+    let hint = '';
+    if (host === 'localhost' || host === '127.0.0.1') {
+      hint = ' (Trên Railway, localhost = DB trong container bot — hãy dùng hostname MySQL từ hosting, ví dụ srv….hstgr.io)';
+    }
+    const detail = e && (e.message || e.code || String(e));
+    res.json({ ok: false, msg: detail + hint });
   }
 });
 
