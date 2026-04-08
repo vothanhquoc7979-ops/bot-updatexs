@@ -13,30 +13,26 @@ const { SCHEDULE } = require('./config');
 function resolveDrawDate(region) {
   const tz = 'Asia/Ho_Chi_Minh';
 
-  // Lấy giờ phút hiện tại theo VN (format HH:MM)
   const now = new Date();
   const hhmm = now.toLocaleTimeString('vi-VN', {
     timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false,
-  }); // vd: "15:45" hoặc "18:55"
+  });
 
-  // Lấy ngày hôm nay và hôm qua theo giờ VN
-  const todayStr     = now.toLocaleDateString('sv-SE', { timeZone: tz });    // "2026-04-04"
+  const todayStr     = now.toLocaleDateString('sv-SE', { timeZone: tz });
   const yesterdayStr = (() => {
     const d = new Date(now);
     d.setDate(d.getDate() - 1);
     return d.toLocaleDateString('sv-SE', { timeZone: tz });
   })();
 
-  // Giờ bắt đầu xổ của region
   const startTime = SCHEDULE[region]?.start || '16:00';
 
-  // Nếu bây giờ chưa đến giờ xổ → dữ liệu fetch về là của hôm qua
   if (hhmm < startTime) {
-    console.log(`[DrawDate] ${region.toUpperCase()} | Hiện tại ${hhmm} < ${startTime} → dữ liệu ngày ${yesterdayStr} (hôm qua)`);
+    console.log('[DrawDate] ' + region.toUpperCase() + ' | Hien tai ' + hhmm + ' < ' + startTime + ' → du lieu ngay ' + yesterdayStr + ' (hom qua)');
     return yesterdayStr;
   }
 
-  console.log(`[DrawDate] ${region.toUpperCase()} | Hiện tại ${hhmm} >= ${startTime} → dữ liệu ngày ${todayStr} (hôm nay)`);
+  console.log('[DrawDate] ' + region.toUpperCase() + ' | Hien tai ' + hhmm + ' >= ' + startTime + ' → du lieu ngay ' + todayStr + ' (hom nay)');
   return todayStr;
 }
 
@@ -46,28 +42,26 @@ async function pushToWeb(region, results) {
   const PHP_SECRET = process.env.PHP_PUSH_SECRET || require('./storage').get('php_push_secret') || '';
 
   if (!PHP_HOST) {
-    console.warn(`[Pusher] PHP_HOST chưa cấu hình (env="${process.env.PHP_HOST || ''}", storage="${require('./storage').get('php_host') || ''"}"), bỏ qua push.`);
+    const ph = process.env.PHP_HOST || '';
+    const sh = require('./storage').get('php_host') || '';
+    console.warn('[Pusher] PHP_HOST chua cau hinh (env="' + ph + '", storage="' + sh + '"), bo qua push.');
     return false;
   }
   if (!PHP_SECRET) {
-    console.warn(`[Pusher] PHP_PUSH_SECRET chưa cấu hình (env="${process.env.PHP_PUSH_SECRET || ''}", storage="${require('./storage').get('php_push_secret') || ''"}"), bỏ qua push.`);
+    const ps = process.env.PHP_PUSH_SECRET || '';
+    const ss = require('./storage').get('php_push_secret') || '';
+    console.warn('[Pusher] PHP_PUSH_SECRET chua cau hinh (env="' + ps + '", storage="' + ss + '"), bo qua push.');
     return false;
   }
 
-  // Xác định ngày đúng dựa vào region + giờ hiện tại
   const drawDate = resolveDrawDate(region);
-
-  const url = `${PHP_HOST.replace(/\/$/, '')}/api/live-push.php`;
+  const url = PHP_HOST.replace(/\/$/, '') + '/api/live-push.php';
 
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
 
-    const body = JSON.stringify({
-      region,
-      date:    drawDate,
-      results,
-    });
+    const body = JSON.stringify({ region, date: drawDate, results });
 
     const res = await fetch(url, {
       method:  'POST',
@@ -83,13 +77,13 @@ async function pushToWeb(region, results) {
 
     const bodyTxt = await res.text();
     if (!res.ok) {
-      console.error(`[Pusher] HTTP ${res.status} từ ${url}: ${bodyTxt.substring(0, 300)}`);
+      console.error('[Pusher] HTTP ' + res.status + ' tu ' + url + ': ' + bodyTxt.substring(0, 300));
       return false;
     }
 
     return true;
   } catch (e) {
-    console.error(`[Pusher] Lỗi kết nối đến ${url}: ${e.message}`);
+    console.error('[Pusher] Loi ket noi den ' + url + ': ' + e.message);
     return false;
   }
 }
