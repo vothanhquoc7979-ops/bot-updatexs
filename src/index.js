@@ -10,6 +10,7 @@ const logger     = require('./logger');
 const storage    = require('./storage');
 const botManager = require('./bot-manager');
 const ui         = require('./ui');
+const forumWS    = require('./forum-ws');
 
 const PORT = process.env.PORT || 3000;
 const app  = express();
@@ -29,8 +30,32 @@ async function main() {
   await botManager.start();
 
   // HTTP server (Railway cần để keepalive + Web UI)
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     logger.log(`✅ HTTP server đang chạy trên port ${PORT}`);
+
+    // Khởi động WebSocket cho forum chat real-time
+    forumWS.init(server);
+    logger.log(`🔌 Forum WebSocket: ws://localhost:${PORT}/forum-ws`);
+  });
+
+  // ── Endpoint: PHP gọi khi có tin nhắn forum mới ──────────
+  app.use(express.json());
+  app.post('/forum/push', (req, res) => {
+    const secret = req.headers['x-bot-secret'];
+    const valid  = (process.env.PHP_PUSH_SECRET || '').trim()
+                 || (storage.get('php_push_secret') || '').trim();
+
+    if (!valid || secret !== valid) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    }
+
+    const { type, message } = req.body;
+    if (!type || !message) {
+      return res.status(400).json({ ok: false, error: 'Missing type or message' });
+    }
+
+    forumWS.broadcast({ type, message, ts: Date.now() });
+    res.json({ ok: true, clients: forumWS.getClientCount() });
   });
 
   // Bật chế độ tự động check giờ xổ (nếu config auto_schedule đang bật)
