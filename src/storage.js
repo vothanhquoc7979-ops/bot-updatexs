@@ -14,6 +14,7 @@ const DEFAULTS = {
   telegram_chat_id: '',
   php_host: '',
   php_push_secret: '',
+  php_server_url: '',   // VD: https://pateanlien.online/api/crawl-save.php
   auto_schedule: true,
 };
 

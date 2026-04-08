@@ -367,12 +367,14 @@ function getDateRange(from, to) {
  * @param {string[]} opts.games    — ['mega','power','max3d','max3dpro','keno']
  * @param {string}   opts.from     — 'YYYY-MM-DD'
  * @param {string}   opts.to       — 'YYYY-MM-DD'
- * @param {Object}   opts.db       — mysql2 pool
+ * @param {Object}   opts.db       — mysql2 pool (dùng khi KHÔNG có phpProxy)
+ * @param {string}   opts.phpProxyUrl     — URL endpoint crawl-save.php
+ * @param {string}   opts.phpPushSecret   — secret để xác thực với PHP
  * @param {Function} opts.onLog    — (msg) => void
  * @param {boolean} opts.force     — xóa rồi cào lại
  * @returns {Promise<{saved: number, errors: number, logs: string[]}>}
  */
-async function crawl({ games, from, to, db, onLog, force = false }) {
+async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, force = false }) {
   const dates = getDateRange(from, to);
   const logs = [];
   let saved = 0;
@@ -385,6 +387,8 @@ async function crawl({ games, from, to, db, onLog, force = false }) {
     max3dpro: 'max3dpro',
     keno:     'keno',
   };
+
+  const useProxy = !!(phpProxyUrl && phpPushSecret);
 
   for (const dateStr of dates) {
     for (const game of games) {
@@ -400,25 +404,59 @@ async function crawl({ games, from, to, db, onLog, force = false }) {
         for (const r of records) {
           const gameType = GAME_MAP[game] || game;
 
-          if (force) {
-            await db.execute(
-              `DELETE FROM vietlott_results WHERE game_type = ? AND draw_date = ?`,
-              [gameType, r.draw_date]
-            );
-          }
+          if (useProxy) {
+            // ── Mode: gọi PHP proxy ───────────────────────────
+            const payload = {
+              type:        'vietlott',
+              game_type:   gameType,
+              draw_date:   r.draw_date,
+              draw_number: r.draw_number || '',
+              numbers:     r.numbers,
+              power_ball: r.power_ball || '',
+              jackpot:     r.jackpot    || '',
+              jackpot2:    r.jackpot2   || '',
+              prizes:      r.prizes     || [],
+            };
 
-          const [result] = await db.execute(
-            `INSERT IGNORE INTO vietlott_results
-               (game_type, draw_date, draw_number, numbers, power_ball, jackpot, jackpot2)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [gameType, r.draw_date, r.draw_number, r.numbers, r.power_ball, r.jackpot, r.jackpot2]
-          );
+            const res = await fetch(phpProxyUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Bot-Secret': phpPushSecret,
+              },
+              body: JSON.stringify(payload),
+            });
 
-          if (result.affectedRows > 0) {
-            saved++;
-            onLog(`[${game.toUpperCase()}] ✅ ${r.draw_date} | ${r.draw_number || '?'} | ${r.numbers.slice(0, 20)}... | JP: ${r.jackpot || '-'}`);
+            const json = await res.json();
+            if (json.ok) {
+              saved++;
+              onLog(`[${game.toUpperCase()}] ✅ PHP lưu ${r.draw_date} | ${r.draw_number || '?'}`);
+            } else {
+              errors++;
+              onLog(`[${game.toUpperCase()}] ❌ PHP lỗi: ${json.error}`);
+            }
           } else {
-            onLog(`[${game.toUpperCase()}] ⏭  ${r.draw_date} đã có, bỏ qua`);
+            // ── Mode: ghi trực tiếp MySQL ─────────────────────
+            if (force) {
+              await db.execute(
+                `DELETE FROM vietlott_results WHERE game_type = ? AND draw_date = ?`,
+                [gameType, r.draw_date]
+              );
+            }
+
+            const [result] = await db.execute(
+              `INSERT IGNORE INTO vietlott_results
+                 (game_type, draw_date, draw_number, numbers, power_ball, jackpot, jackpot2)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [gameType, r.draw_date, r.draw_number, r.numbers, r.power_ball, r.jackpot, r.jackpot2]
+            );
+
+            if (result.affectedRows > 0) {
+              saved++;
+              onLog(`[${game.toUpperCase()}] ✅ ${r.draw_date} | ${r.draw_number || '?'} | ${r.numbers.slice(0, 20)}... | JP: ${r.jackpot || '-'}`);
+            } else {
+              onLog(`[${game.toUpperCase()}] ⏭  ${r.draw_date} đã có, bỏ qua`);
+            }
           }
         }
       } catch (e) {

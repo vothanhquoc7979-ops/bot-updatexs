@@ -54,9 +54,16 @@ app.get('/health', (_, res) => res.json({ status: 'ok', time: new Date().toISOSt
 
 // ── API: Crawl Vietlott ─────────────────────────────────
 app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
-  const pool = getMySQLPool();
-  if (!pool) {
-    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình MySQL (MYSQL_HOST env)' });
+  const cfg = storage.load();
+  const phpProxyUrl = cfg.php_server_url;
+  const phpSecret   = (cfg.php_push_secret || '').trim();
+
+  // Chọn cách ghi: MySQL trực tiếp (có pool) HOẶC PHP proxy
+  const useProxy    = !!(phpProxyUrl && phpSecret);
+  const pool        = !useProxy ? getMySQLPool() : null;
+
+  if (!useProxy && !pool) {
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình MySQL (cần pool hoặc PHP Server URL)' });
   }
 
   const { games = [], from, to, force = false } = req.body;
@@ -79,7 +86,9 @@ app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
       games,
       from,
       to,
-      db: pool,
+      db: pool || undefined,
+      phpProxyUrl: useProxy ? phpProxyUrl : undefined,
+      phpPushSecret: useProxy ? phpSecret  : undefined,
       force,
       onLog: (msg) => {
         collectedLogs.push({ ts: new Date().toISOString(), msg });
@@ -101,9 +110,15 @@ app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
 
 // ── API: Crawl 3 Miền (XSMB, XSMN, XSMT) ─────────────────
 app.post('/api/crawler/mien', ui.requireAuth, async (req, res) => {
-  const pool = getMySQLPool();
-  if (!pool) {
-    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình MySQL (MYSQL_HOST env)' });
+  const cfg = storage.load();
+  const phpProxyUrl = cfg.php_server_url;
+  const phpSecret   = (cfg.php_push_secret || '').trim();
+
+  const useProxy = !!(phpProxyUrl && phpSecret);
+  const pool     = !useProxy ? getMySQLPool() : null;
+
+  if (!useProxy && !pool) {
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình MySQL (cần pool hoặc PHP Server URL)' });
   }
 
   const { regions = [], from, to } = req.body;
@@ -126,7 +141,9 @@ app.post('/api/crawler/mien', ui.requireAuth, async (req, res) => {
       regions,
       from,
       to,
-      db: pool,
+      db: pool || undefined,
+      phpProxyUrl: useProxy ? phpProxyUrl : undefined,
+      phpPushSecret: useProxy ? phpSecret  : undefined,
       onLog: (msg) => {
         collectedLogs.push({ ts: new Date().toISOString(), msg });
         logger.log(msg);

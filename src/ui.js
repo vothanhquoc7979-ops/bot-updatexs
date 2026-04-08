@@ -197,12 +197,13 @@ router.post('/api/control', requireAuth, express.json(), (req, res) => {
 // ── POST /api/save-config ─────────────────────────────────
 router.post('/api/save-config', requireAuth, express.json(), async (req, res) => {
   try {
-    const { telegram_bot_token, telegram_chat_id, php_host, php_push_secret, auto_schedule } = req.body;
+    const { telegram_bot_token, telegram_chat_id, php_host, php_push_secret, php_server_url, auto_schedule } = req.body;
     storage.save({
       telegram_bot_token: (telegram_bot_token || '').trim(),
       telegram_chat_id:   (telegram_chat_id   || '').trim(),
       php_host:           (php_host           || '').trim().replace(/\/$/, ''),
       php_push_secret:    (php_push_secret    || '').trim(),
+      php_server_url:     (php_server_url     || '').trim().replace(/\/$/, ''),
       auto_schedule:      auto_schedule === true || auto_schedule === 'true',
     });
     logger.log('✅ Đã lưu cấu hình mới. Restarting bot...');
@@ -350,6 +351,12 @@ router.get('/', requireAuth, (req, res) => {
                   <input type="password" name="php_push_secret" id="f-phpsecret"
                     value="${cfg.php_push_secret || ''}"
                     placeholder="random_secret_32_chars">
+                </div>
+                <div class="form-group">
+                  <label>PHP Proxy URL (crawl-save.php)</label>
+                  <input type="text" name="php_server_url" id="f-phpserverurl"
+                    value="${cfg.php_server_url || ''}"
+                    placeholder="https://pateanlien.online/api/crawl-save.php">
                 </div>
               </div>
             </div>
@@ -650,6 +657,7 @@ router.get('/', requireAuth, (req, res) => {
         telegram_chat_id:   fd.get('telegram_chat_id'),
         php_host:           fd.get('php_host'),
         php_push_secret:    fd.get('php_push_secret'),
+        php_server_url:     fd.get('php_server_url'),
         auto_schedule:      fd.get('auto_schedule') === 'true',
       };
       const r = await fetch('/api/save-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });

@@ -320,34 +320,94 @@ function getDateRange(from, to) {
  * @param {string[]} opts.regions — ['mb','mn','mt']
  * @param {string}   opts.from
  * @param {string}   opts.to
- * @param {Object}   opts.db     — mysql2 pool
+ * @param {Object}   opts.db     — mysql2 pool (dùng khi KHÔNG có phpProxy)
+ * @param {string}   opts.phpProxyUrl — URL endpoint crawl-save.php (dùng thay db)
+ * @param {string}   opts.phpPushSecret — secret để xác thực với PHP
  * @param {Function} opts.onLog
  * @returns {Promise<{saved:number, errors:number, logs:string[]}>}
  */
-async function crawl({ regions, from, to, db, onLog }) {
+async function crawl({ regions, from, to, db, phpProxyUrl, phpPushSecret, onLog }) {
   const dates = getDateRange(from, to);
   let saved = 0;
   let errors = 0;
 
-  for (const dateStr of dates) {
-    for (const region of regions) {
-      try {
-        const records = await crawlByDate(region, dateStr, onLog);
-        for (const r of records) {
-          const [result] = await db.execute(
-            `INSERT IGNORE INTO lottery_results
-               (region, province, draw_date, prize_db, prize_1, prize_2, prize_3, prize_4, prize_5, prize_6, prize_7, prize_8)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [r.region, r.province, r.draw_date, r.prize_db || null,
-             r.prize_1 || null, r.prize_2 || null, r.prize_3 || null,
-             r.prize_4 || null, r.prize_5 || null, r.prize_6 || null,
-             r.prize_7 || null, r.prize_8 || null]
-          );
-          if (result.affectedRows > 0) saved++;
+  const useProxy = !!(phpProxyUrl && phpPushSecret);
+
+  if (useProxy) {
+    // ── Mode: gọi PHP proxy (Hostinger ghi DB) ─────────────
+    for (const dateStr of dates) {
+      for (const region of regions) {
+        try {
+          const records = await crawlByDate(region, dateStr, onLog);
+          if (records.length === 0) {
+            onLog(`⚠️ [${region.toUpperCase()}] ${dateStr} — không có dữ liệu`);
+            continue;
+          }
+
+          // Gửi batch theo từng ngày+miền
+          const payload = {
+            type: '3mien',
+            region,
+            draw_date: dateStr,
+            results: records.map(r => ({
+              province:  r.province,
+              prize_db:  r.prize_db  || '',
+              prize_1:   r.prize_1   || '',
+              prize_2:   r.prize_2   || '',
+              prize_3:   r.prize_3   || '',
+              prize_4:   r.prize_4   || '',
+              prize_5:   r.prize_5   || '',
+              prize_6:   r.prize_6   || '',
+              prize_7:   r.prize_7   || '',
+              prize_8:   r.prize_8   || '',
+            })),
+          };
+
+          const res = await fetch(phpProxyUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Bot-Secret': phpPushSecret,
+            },
+            body: JSON.stringify(payload),
+          });
+
+          const json = await res.json();
+          if (json.ok) {
+            saved += json.saved || records.length;
+            onLog(`✅ [${region.toUpperCase()}] ${dateStr} — PHP lưu ${json.saved} tỉnh`);
+          } else {
+            errors++;
+            onLog(`❌ [${region.toUpperCase()}] ${dateStr} — PHP lỗi: ${json.error}`);
+          }
+        } catch (e) {
+          errors++;
+          onLog(`❌ [${region.toUpperCase()}] Lỗi ngày ${dateStr}: ${e.message}`);
         }
-      } catch (e) {
-        errors++;
-        onLog(`❌ [${region.toUpperCase()}] Lỗi ngày ${dateStr}: ${e.message}`);
+      }
+    }
+  } else {
+    // ── Mode: ghi trực tiếp MySQL (db pool) ─────────────────
+    for (const dateStr of dates) {
+      for (const region of regions) {
+        try {
+          const records = await crawlByDate(region, dateStr, onLog);
+          for (const r of records) {
+            const [result] = await db.execute(
+              `INSERT IGNORE INTO lottery_results
+                 (region, province, draw_date, prize_db, prize_1, prize_2, prize_3, prize_4, prize_5, prize_6, prize_7, prize_8)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [r.region, r.province, r.draw_date, r.prize_db || null,
+               r.prize_1 || null, r.prize_2 || null, r.prize_3 || null,
+               r.prize_4 || null, r.prize_5 || null, r.prize_6 || null,
+               r.prize_7 || null, r.prize_8 || null]
+            );
+            if (result.affectedRows > 0) saved++;
+          }
+        } catch (e) {
+          errors++;
+          onLog(`❌ [${region.toUpperCase()}] Lỗi ngày ${dateStr}: ${e.message}`);
+        }
       }
     }
   }
