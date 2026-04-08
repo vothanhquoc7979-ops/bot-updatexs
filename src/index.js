@@ -145,7 +145,80 @@ app.post('/api/crawler/mien', ui.requireAuth, async (req, res) => {
   }
 });
 
-// ── Khởi động ────────────────────────────────────────────
+// ── POST /api/mysql-check ────────────────────────────────
+app.post('/api/mysql-check', ui.requireAuth, express.json(), async (req, res) => {
+  const { mysql_host, mysql_port, mysql_user, mysql_password, mysql_database } = req.body;
+
+  if (!mysql_host || !mysql_user || !mysql_database) {
+    return res.json({ ok: false, msg: 'Thiếu thông tin kết nối' });
+  }
+
+  try {
+    const mysql2 = require('mysql2/promise');
+    const testPool = mysql2.createPool({
+      host:     mysql_host,
+      port:     parseInt(mysql_port || '3306'),
+      user:     mysql_user,
+      password: mysql_password || '',
+      database: mysql_database,
+      connectTimeout: 8000,
+    });
+    await testPool.query('SELECT 1');
+    await testPool.end();
+    res.json({ ok: true });
+  } catch (e) {
+    res.json({ ok: false, msg: e.message });
+  }
+});
+
+// ── POST /api/save-mysql ─────────────────────────────────
+app.post('/api/save-mysql', ui.requireAuth, express.json(), async (req, res) => {
+  const { mysql_host, mysql_port, mysql_user, mysql_password, mysql_database } = req.body;
+
+  // Validate basic fields
+  if (!mysql_host || !mysql_user || !mysql_database) {
+    return res.status(400).json({ ok: false, msg: 'Thiếu host / user / database' });
+  }
+
+  // Test connection first
+  try {
+    const mysql2 = require('mysql2/promise');
+    const testPool = mysql2.createPool({
+      host:     mysql_host,
+      port:     parseInt(mysql_port || '3306'),
+      user:     mysql_user,
+      password: mysql_password || '',
+      database: mysql_database,
+      connectTimeout: 8000,
+    });
+    await testPool.query('SELECT 1');
+    await testPool.end();
+  } catch (e) {
+    return res.json({ ok: false, msg: 'Kết nối thất bại: ' + e.message });
+  }
+
+  // Lưu vào storage (config.json)
+  const cfg = storage.load();
+  cfg.mysql_host     = mysql_host;
+  cfg.mysql_port     = mysql_port;
+  cfg.mysql_user     = mysql_user;
+  cfg.mysql_password = mysql_password;
+  cfg.mysql_database = mysql_database;
+  storage.save(cfg);
+
+  // Cập nhật env cho process hiện tại
+  process.env.MYSQL_HOST     = mysql_host;
+  process.env.MYSQL_PORT     = mysql_port || '3306';
+  process.env.MYSQL_USER     = mysql_user;
+  process.env.MYSQL_PASSWORD = mysql_password || '';
+  process.env.MYSQL_DATABASE = mysql_database;
+
+  // Reset pool để dùng config mới
+  mysqlPool = null;
+  getMySQLPool();
+
+  res.json({ ok: true });
+});
 async function main() {
   logger.log('🚀 Khởi động KQXS Live Bot...');
   logger.log(`🌐 Dashboard: http://localhost:${PORT}`);
