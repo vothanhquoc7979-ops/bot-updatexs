@@ -433,9 +433,12 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
               onLog(`[${game.toUpperCase()}] ✅ PHP lưu ${r.draw_date} | ${r.draw_number || '?'}`);
             } else {
               errors++;
-              onLog(`[${game.toUpperCase()}] ❌ PHP lỗi: ${json.error}`);
+              onLog(`[${game.toUpperCase()}] ❌ PHP lỗi: ${json.error || '(không có chi tiết)'}`);
             }
-          } else {
+          } catch (e) {
+            errors++;
+            onLog(`[${game.toUpperCase()}] ❌ HTTP lỗi ${r.draw_date}: ${e.message}`);
+          }
             // ── Mode: ghi trực tiếp MySQL ─────────────────────
             if (force) {
               await db.execute(

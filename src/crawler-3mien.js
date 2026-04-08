@@ -378,11 +378,11 @@ async function crawl({ regions, from, to, db, phpProxyUrl, phpPushSecret, onLog 
             onLog(`✅ [${region.toUpperCase()}] ${dateStr} — PHP lưu ${json.saved} tỉnh`);
           } else {
             errors++;
-            onLog(`❌ [${region.toUpperCase()}] ${dateStr} — PHP lỗi: ${json.error}`);
+            onLog(`❌ [${region.toUpperCase()}] ${dateStr} — PHP lỗi: ${json.error || '?'}`);
           }
         } catch (e) {
           errors++;
-          onLog(`❌ [${region.toUpperCase()}] Lỗi ngày ${dateStr}: ${e.message}`);
+          onLog(`❌ [${region.toUpperCase()}] ${dateStr} — HTTP/Fetch lỗi: ${e.message}`);
         }
       }
     }

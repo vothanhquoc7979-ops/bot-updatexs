@@ -66,6 +66,8 @@ app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
     return res.status(500).json({ ok: false, msg: 'Chưa cấu hình MySQL (cần pool hoặc PHP Server URL)' });
   }
 
+  logger.log(`[Crawl Vietlott] mode=${useProxy ? 'PHP_PROXY' : 'MYSQL_DIRECT'} url=${phpProxyUrl || 'N/A'}`);
+
   const { games = [], from, to, force = false } = req.body;
 
   if (!games.length || !from || !to) {
@@ -120,6 +122,8 @@ app.post('/api/crawler/mien', ui.requireAuth, async (req, res) => {
   if (!useProxy && !pool) {
     return res.status(500).json({ ok: false, msg: 'Chưa cấu hình MySQL (cần pool hoặc PHP Server URL)' });
   }
+
+  logger.log(`[Crawl 3Miên] mode=${useProxy ? 'PHP_PROXY' : 'MYSQL_DIRECT'} url=${phpProxyUrl || 'N/A'}`);
 
   const { regions = [], from, to } = req.body;
 
