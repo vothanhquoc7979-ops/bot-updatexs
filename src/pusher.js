@@ -45,8 +45,12 @@ async function pushToWeb(region, results) {
   const PHP_HOST   = process.env.PHP_HOST        || require('./storage').get('php_host')        || '';
   const PHP_SECRET = process.env.PHP_PUSH_SECRET || require('./storage').get('php_push_secret') || '';
 
-  if (!PHP_HOST || !PHP_SECRET) {
-    console.warn('[Pusher] PHP_HOST hoặc PHP_PUSH_SECRET chưa cấu hình, bỏ qua push.');
+  if (!PHP_HOST) {
+    console.warn(`[Pusher] PHP_HOST chưa cấu hình (env="${process.env.PHP_HOST || ''}", storage="${require('./storage').get('php_host') || ''"}"), bỏ qua push.`);
+    return false;
+  }
+  if (!PHP_SECRET) {
+    console.warn(`[Pusher] PHP_PUSH_SECRET chưa cấu hình (env="${process.env.PHP_PUSH_SECRET || ''}", storage="${require('./storage').get('php_push_secret') || ''"}"), bỏ qua push.`);
     return false;
   }
 
@@ -59,6 +63,12 @@ async function pushToWeb(region, results) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
 
+    const body = JSON.stringify({
+      region,
+      date:    drawDate,
+      results,
+    });
+
     const res = await fetch(url, {
       method:  'POST',
       signal:  controller.signal,
@@ -66,24 +76,20 @@ async function pushToWeb(region, results) {
         'Content-Type': 'application/json',
         'X-Bot-Secret': PHP_SECRET,
       },
-      body: JSON.stringify({
-        region,
-        date:    drawDate,   // ← Ngày đã được xác thực đúng
-        results,
-      }),
+      body,
     });
 
     clearTimeout(timer);
 
+    const bodyTxt = await res.text();
     if (!res.ok) {
-      const body = await res.text();
-      console.error(`[Pusher] HTTP ${res.status}: ${body.substring(0, 200)}`);
+      console.error(`[Pusher] HTTP ${res.status} từ ${url}: ${bodyTxt.substring(0, 300)}`);
       return false;
     }
 
     return true;
   } catch (e) {
-    console.error('[Pusher] Lỗi push:', e.message);
+    console.error(`[Pusher] Lỗi kết nối đến ${url}: ${e.message}`);
     return false;
   }
 }

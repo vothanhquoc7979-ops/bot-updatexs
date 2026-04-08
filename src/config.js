@@ -5,11 +5,21 @@
 
 const BASE_URL = 'https://s2.kqxs.tube/str/ttkq';
 
+// Tất cả server có thể dùng (thứ tự ưu tiên)
+const ALL_SERVERS = ['s2', 's7', 's5', 's3'];
+
+// Build URL với server cụ thể
+function buildUrls(region) {
+  return ALL_SERVERS.map(s =>
+    `https://${s}.kqxs.tube/str/ttkq/str_kq${region}/`
+  );
+}
+
 module.exports = {
   API: {
-    mb: `${BASE_URL}/str_kqmb/`,
-    mn: `${BASE_URL}/str_kqmn/`,
-    mt: `${BASE_URL}/str_kqmt/`,
+    mb: buildUrls('mb'),
+    mn: buildUrls('mn'),
+    mt: buildUrls('mt'),
   },
 
   // Lịch xổ (giờ VN, format HH:MM) bắt đầu quét sớm 15 phút trước giờ xổ thực
@@ -35,7 +45,7 @@ module.exports = {
   // Map code tỉnh từ API sang tên đầy đủ
   PROVINCE_MAP: {
     // Miền Nam
-    VL: 'Vĩnh Long',   BD: 'Bình Dương',  TV: 'Trà Vinh',
+    VL: 'Vĩnh Long',   BD: 'Bình Dư��ng',  TV: 'Trà Vinh',
     CT: 'Cần Thơ',     LA: 'Long An',     HCM: 'TP. HCM',
     DN: 'Đồng Nai',    ST: 'Sóc Trăng',   CM: 'Cà Mau',
     TG: 'Tiền Giang',  AG: 'An Giang',    BL: 'Bạc Liêu',

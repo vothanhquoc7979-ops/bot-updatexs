@@ -15,19 +15,39 @@
 
 const { API, PROVINCE_MAP } = require('./config');
 
-// ─── HTTP fetch với timeout ─────────────────────────────────
-async function httpGet(url) {
+// ─── Danh sách server fallback ────────────────────────────────
+// Thứ tự ưu tiên: s2 → s7 → s5 → s3
+const SERVER_POOL = ['s2', 's7', 's5', 's3'];
+
+// ─── HTTP fetch với timeout + retry ─────────────────────────
+async function httpGetWithRetry(urls, maxRetries = 2) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) return null;
-    return await res.text();
-  } catch (e) {
-    return null;
-  } finally {
-    clearTimeout(timer);
+  const timer = setTimeout(() => controller.abort(), 12000);
+
+  for (const rawUrl of urls) {
+    // Mỗi server thử 2 lần (lần 1: ?t=timestamp, lần 2: hash cứng)
+    const variants = [
+      rawUrl + (rawUrl.includes('?') ? '&' : '?') + 't=' + Date.now(),
+      rawUrl + '/a?t=' + Date.now(),
+    ];
+
+    for (const variant of variants) {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const res = await fetch(variant, { signal: controller.signal });
+          if (!res.ok) continue;
+          const text = await res.text();
+          if (text && text.trim().length > 20) {
+            clearTimeout(timer);
+            return text.trim();
+          }
+        } catch (_) {}
+      }
+    }
   }
+
+  clearTimeout(timer);
+  return null;
 }
 
 // ─── Parse chuỗi giải thưởng "G1:12345-67890" → "12345,67890" ─
@@ -131,13 +151,11 @@ function parseMNMT(raw, region) {
 
 // ─── Public: fetch và parse 1 region ───────────────────────
 async function fetchRegion(region) {
-  let url = API[region];
-  if (!url) throw new Error(`Unknown region: ${region}`);
-  
-  // Thêm tham số timestamp để báo Cập Nhật Mới theo format API mới
-  url = `${url}t=${Date.now()}`;
+  let urls = API[region];
+  if (!urls) throw new Error(`Unknown region: ${region}`);
+  if (!Array.isArray(urls)) urls = [urls]; // backward compat
 
-  const raw = await httpGet(url);
+  const raw = await httpGetWithRetry(urls);
   if (!raw || raw.trim() === '') return null;
 
   const text = raw.trim();
