@@ -99,6 +99,52 @@ app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
   }
 });
 
+// ── API: Crawl 3 Miền (XSMB, XSMN, XSMT) ─────────────────
+app.post('/api/crawler/mien', ui.requireAuth, async (req, res) => {
+  const pool = getMySQLPool();
+  if (!pool) {
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình MySQL (MYSQL_HOST env)' });
+  }
+
+  const { regions = [], from, to } = req.body;
+
+  if (!regions.length || !from || !to) {
+    return res.status(400).json({ ok: false, msg: 'Thiếu regions / from / to' });
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return res.status(400).json({ ok: false, msg: 'Ngày không hợp lệ (định dạng YYYY-MM-DD)' });
+  }
+
+  const { crawl } = require('./crawler-3mien');
+
+  const startTime = Date.now();
+  const collectedLogs = [];
+
+  try {
+    const result = await crawl({
+      regions,
+      from,
+      to,
+      db: pool,
+      onLog: (msg) => {
+        collectedLogs.push({ ts: new Date().toISOString(), msg });
+        logger.log(msg);
+      },
+    });
+
+    res.json({
+      ok: true,
+      saved: result.saved,
+      errors: result.errors,
+      elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
+      logs: collectedLogs,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, msg: e.message, logs: collectedLogs });
+  }
+});
+
 // ── Khởi động ────────────────────────────────────────────
 async function main() {
   logger.log('🚀 Khởi động KQXS Live Bot...');
@@ -169,3 +215,7 @@ main().catch(err => {
 // ── Graceful shutdown ───────────────────────────────────
 process.once('SIGINT',  () => { logger.log('SIGINT — tắt bot'); process.exit(0); });
 process.once('SIGTERM', () => { logger.log('SIGTERM — tắt bot'); process.exit(0); });
+
+// Export getMySQLPool để ui.js có thể dùng
+module.exports = { getMySQLPool };
+module.exports.default = app;

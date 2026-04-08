@@ -147,6 +147,19 @@ router.get('/api/status', requireAuth, (req, res) => {
   });
 });
 
+// ── GET /api/mysql-check ──────────────────────────────────
+router.get('/api/mysql-check', requireAuth, async (req, res) => {
+  try {
+    const { getMySQLPool } = require('../index.js');
+    const pool = getMySQLPool();
+    if (!pool) return res.json({ ok: false, msg: 'Chưa cấu hình MYSQL_HOST env' });
+    await pool.query('SELECT 1');
+    return res.json({ ok: true });
+  } catch (e) {
+    res.json({ ok: false, msg: e.message });
+  }
+});
+
 // ── GET /api/logs ─────────────────────────────────────────
 router.get('/api/logs', requireAuth, (req, res) => {
   res.json(logger.getLogs(100));
@@ -354,16 +367,39 @@ router.get('/', requireAuth, (req, res) => {
 
       </div><!-- /panel-dashboard -->
 
-      <!-- ═══════════════ TAB: CRAWL VIETLOTT ═══════════════ -->
+      <!-- ═══════════════ TAB: CRAWL DỮ LIỆU ═══════════════ -->
       <div id="panel-crawl" style="display:none">
 
+        <!-- Cảnh báo MySQL -->
+        <div id="mysql-warn" class="alert alert-err" style="display:none;margin-bottom:16px">
+          ⚠️ <strong>Chưa cấu hình MySQL!</strong><br>
+          Thêm biến môi trường trên Railway Dashboard → Variables:<br>
+          <code style="font-size:11px">MYSQL_HOST</code> · <code style="font-size:11px">MYSQL_USER</code> · <code style="font-size:11px">MYSQL_PASSWORD</code> · <code style="font-size:11px">MYSQL_DATABASE</code>
+        </div>
+
+        <!-- Trạng thái MySQL -->
+        <div id="mysql-ok" class="alert alert-ok" style="display:none;margin-bottom:16px">
+          ✅ Đã kết nối MySQL — Dữ liệu sẽ lưu vào database
+        </div>
+
         <div class="card">
-          <div class="card-hd">🎯 Chọn game Vietlott cần crawl</div>
+          <div class="card-hd">🎯 Chọn loại xổ số cần crawl</div>
           <div class="card-body">
             <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-              <button class="btn btn-blue btn-sm" onclick="toggleAllGames(true)">✅ Chọn tất cả</button>
-              <button class="btn btn-gray btn-sm" onclick="toggleAllGames(false)">❌ Bỏ chọn tất cả</button>
+              <button class="btn btn-blue btn-sm" onclick="toggleAllMien(true)">✅ Chọn tất cả 3 Miền</button>
+              <button class="btn btn-gray btn-sm" onclick="toggleAllMien(false)">❌ Bỏ chọn</button>
             </div>
+
+            <!-- 3 Miền -->
+            <p style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">📌 Xổ số 3 Miền (web: xskt.com.vn)</p>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:16px">
+              <label class="game-check"><input type="checkbox" class="mien-cb" value="mb"> 🏛️ XS Miền Bắc (XSMB)</label>
+              <label class="game-check"><input type="checkbox" class="mien-cb" value="mn"> 🌴 XS Miền Nam (XSMN)</label>
+              <label class="game-check"><input type="checkbox" class="mien-cb" value="mt"> 🏝️ XS Miền Trung (XSMT)</label>
+            </div>
+
+            <!-- Vietlott -->
+            <p style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">💰 Vietlott (web: kqxs.vn / xosothantai.mobi)</p>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:14px">
               <label class="game-check"><input type="checkbox" class="game-cb" value="mega"> 🎰 Mega 6/45</label>
               <label class="game-check"><input type="checkbox" class="game-cb" value="power"> ⚡ Power 6/55</label>
@@ -380,12 +416,6 @@ router.get('/', requireAuth, (req, res) => {
               <div class="form-group" style="margin:0">
                 <label>Đến ngày</label>
                 <input type="date" id="crawl-to" class="form-control" value="${new Date().toISOString().slice(0,10)}">
-              </div>
-              <div class="form-group" style="margin:0">
-                <label>&nbsp;</label>
-                <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;white-space:nowrap">
-                  <input type="checkbox" id="crawl-force"> 🔄 Xóa rồi cào lại
-                </label>
               </div>
               <button class="btn btn-primary" id="btn-crawl" onclick="runCrawl()">🚀 Bắt đầu crawl</button>
             </div>
@@ -413,7 +443,7 @@ router.get('/', requireAuth, (req, res) => {
         <div class="card" style="margin-top:16px">
           <div class="card-hd">📋 Log kết quả</div>
           <div class="card-body" style="padding:12px">
-            <div id="crawl-logbox"><span style="color:var(--muted)">Chọn game → khoảng ngày → bấm Bắt đầu crawl...</span></div>
+            <div id="crawl-logbox"><span style="color:var(--muted)">Chọn loại xổ → khoảng ngày → bấm Bắt đầu crawl...</span></div>
           </div>
         </div>
 
@@ -428,6 +458,20 @@ router.get('/', requireAuth, (req, res) => {
       document.getElementById('panel-crawl').style.display     = name === 'crawl'     ? '' : 'none';
       document.getElementById('tab-dashboard').className = 'tab-btn' + (name === 'dashboard' ? ' active' : '');
       document.getElementById('tab-crawl').className     = 'tab-btn' + (name === 'crawl'     ? ' active' : '');
+      if (name === 'crawl') checkMySQLStatus();
+    }
+
+    // ── Check MySQL status ────────────────────────────────
+    async function checkMySQLStatus() {
+      try {
+        const r = await fetch('/api/status');
+        const d = await r.json();
+        document.getElementById('mysql-warn').style.display = '';
+        document.getElementById('mysql-ok').style.display   = 'none';
+      } catch (_) {
+        document.getElementById('mysql-warn').style.display = '';
+        document.getElementById('mysql-ok').style.display   = 'none';
+      }
     }
 
     // ── Poll status mỗi 5s ──────────────────────────────
@@ -518,9 +562,9 @@ router.get('/', requireAuth, (req, res) => {
       flash(d.ok ? 'Đã lưu cấu hình! Bot đang restart...' : (d.msg || 'Lỗi'), d.ok);
     });
 
-    // ── Crawl Vietlott ────────────────────────────────────
-    function toggleAllGames(checked) {
-      document.querySelectorAll('.game-cb').forEach(cb => { cb.checked = checked; });
+    // ── Crawl Dữ Liệu ────────────────────────────────────
+    function toggleAllMien(checked) {
+      document.querySelectorAll('.mien-cb').forEach(cb => { cb.checked = checked; });
     }
 
     function appendCrawlLog(msg, color = '#e8e8f0') {
@@ -533,13 +577,15 @@ router.get('/', requireAuth, (req, res) => {
     }
 
     async function runCrawl() {
-      const checked = Array.from(document.querySelectorAll('.game-cb:checked')).map(cb => cb.value);
+      const mienChecked  = Array.from(document.querySelectorAll('.mien-cb:checked')).map(cb => cb.value);
+      const vietlottChecked = Array.from(document.querySelectorAll('.game-cb:checked')).map(cb => cb.value);
       const from    = document.getElementById('crawl-from').value;
       const to      = document.getElementById('crawl-to').value;
-      const force   = document.getElementById('crawl-force').checked;
 
-      if (!checked.length) { alert('Vui lòng chọn ít nhất 1 game!'); return; }
-      if (!from || !to)     { alert('Vui lòng chọn khoảng ngày!');   return; }
+      if (!mienChecked.length && !vietlottChecked.length) {
+        alert('Vui lòng chọn ít nhất 1 loại xổ số!'); return;
+      }
+      if (!from || !to) { alert('Vui lòng chọn khoảng ngày!'); return; }
 
       const btn = document.getElementById('btn-crawl');
       btn.disabled = true;
@@ -557,36 +603,64 @@ router.get('/', requireAuth, (req, res) => {
       progPanel.style.display = '';
       summary.style.display   = 'none';
 
-      appendCrawlLog('🚀 Bắt đầu crawl ' + checked.join(', ') + ' từ ' + from + ' → ' + to, '#ffd700');
+      let totalSaved = 0;
+      let totalErrors = 0;
 
-      try {
-        const res = await fetch('/api/crawler/vietlott', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ games: checked, from, to, force }),
-        });
-
-        const data = await res.json();
-
-        if (data.ok) {
-          progBar.style.width = '100%';
-          progCount.textContent = data.saved + ' bản ghi';
-          progLabel.textContent = '✅ Hoàn tất!';
-
-          appendCrawlLog('✅ Hoàn tất! Đã lưu ' + data.saved + ' bản ghi, ' + data.errors + ' lỗi | Thời gian: ' + data.elapsed, '#4caf50');
-
-          summary.style.display = '';
-          summary.innerHTML = '<span style="color:#4caf50">✅ Lưu ' + data.saved + ' bản ghi</span> · <span style="color:#ef5350">❌ ' + data.errors + ' lỗi</span> · ⏱ ' + data.elapsed;
-        } else {
-          appendCrawlLog('❌ Lỗi: ' + data.msg, '#ef5350');
-          progLabel.textContent = '❌ Lỗi';
+      // ── Crawl 3 Miền ──────────────────────────────
+      if (mienChecked.length) {
+        appendCrawlLog('📌 Bắt đầu crawl 3 Miền: ' + mienChecked.join(', ') + ' | ' + from + ' → ' + to, '#ffd700');
+        try {
+          const res = await fetch('/api/crawler/mien', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ regions: mienChecked, from, to }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            totalSaved  += data.saved;
+            totalErrors += data.errors;
+            appendCrawlLog('✅ 3 Miền: đã lưu ' + data.saved + ' bản ghi, ' + data.errors + ' lỗi | ' + data.elapsed, '#4caf50');
+          } else {
+            appendCrawlLog('❌ 3 Miền lỗi: ' + data.msg, '#ef5350');
+          }
+        } catch (e) {
+          appendCrawlLog('❌ Lỗi kết nối 3 Miền: ' + e.message, '#ef5350');
         }
-      } catch (e) {
-        appendCrawlLog('❌ Lỗi kết nối: ' + e.message, '#ef5350');
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '🚀 Bắt đầu crawl';
       }
+
+      // ── Crawl Vietlott ────────────────────────────
+      if (vietlottChecked.length) {
+        appendCrawlLog('💰 Bắt đầu crawl Vietlott: ' + vietlottChecked.join(', ') + ' | ' + from + ' → ' + to, '#ffd700');
+        try {
+          const res = await fetch('/api/crawler/vietlott', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ games: vietlottChecked, from, to, force: false }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            totalSaved  += data.saved;
+            totalErrors += data.errors;
+            appendCrawlLog('✅ Vietlott: đã lưu ' + data.saved + ' bản ghi, ' + data.errors + ' lỗi | ' + data.elapsed, '#4caf50');
+          } else {
+            appendCrawlLog('❌ Vietlott lỗi: ' + data.msg, '#ef5350');
+          }
+        } catch (e) {
+          appendCrawlLog('❌ Lỗi kết nối Vietlott: ' + e.message, '#ef5350');
+        }
+      }
+
+      // ── Tổng kết ──────────────────────────────────
+      progBar.style.width = '100%';
+      progCount.textContent = totalSaved + ' bản ghi';
+      progLabel.textContent = '✅ Hoàn tất!';
+      summary.style.display = '';
+      summary.innerHTML = '<span style="color:#4caf50">✅ Lưu ' + totalSaved + ' bản ghi</span> · <span style="color:#ef5350">❌ ' + totalErrors + ' lỗi</span>';
+
+      appendCrawlLog('🏁 HOÀN TẤT! Tổng: ' + totalSaved + ' lưu, ' + totalErrors + ' lỗi', '#ffd700');
+
+      btn.disabled = false;
+      btn.textContent = '🚀 Bắt đầu crawl';
     }
 
     // ── Start polling ────────────────────────────────────
