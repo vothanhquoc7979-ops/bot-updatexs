@@ -117,21 +117,6 @@ async function fetchVietlottGame(gameType, dateStr, urlSlug, maxN, expectedBalls
     if (j2Match) jackpot2 = j2Match[1].replace(/[^0-9]/g, '');
   }
 
-  // Strategy C: scan element lớn
-  if (candidates.length === 0) {
-    const els = $('tr, td, p, div');
-    els.each((_, el) => {
-      if (candidates.length >= expectedBalls) return;
-      let txt = $(el).text();
-      if (txt.length > 200) return;
-      let matches = txt.match(/\b(\d{2})\b/g) || [];
-      let valid = matches.map(n => n).filter(n => parseInt(n) >= 1 && parseInt(n) <= maxN);
-      if (valid.length === expectedBalls || valid.length === expectedBalls + 1) {
-        candidates = valid.slice(0, expectedBalls + 1);
-      }
-    });
-  }
-
   if (candidates.length < expectedBalls) {
     return null;
   }
@@ -269,6 +254,7 @@ async function fetchKeno(dateStr) {
   if (sets.length === 0) {
     const allNums = [];
     const re = /\b(\d{1,2})\b/g;
+    let match;
     while ((match = re.exec(html)) !== null) {
       const n = parseInt(match[1]);
       if (n >= 1 && n <= 80) allNums.push(n);
@@ -396,7 +382,14 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
                 body: JSON.stringify(payload),
               });
 
-              const json = await res.json();
+              const text = await res.text();
+              let json;
+              try {
+                json = JSON.parse(text);
+              } catch (err) {
+                throw new Error(`Invalid JSON from PHP: ${text.substring(0, 100)}...`);
+              }
+
               if (json.ok) {
                 saved++;
                 onLog(`[${game.toUpperCase()}] ✅ PHP lưu ${r.draw_date} | ${r.draw_number || '?'}`);

@@ -241,7 +241,7 @@ function parseHtmlMb(html, dateStr) {
 // ─── Parse HTML XSMN / XSMT ──────────────────────────────
 function parseHtmlMnMt(html, dateStr, region) {
   const $ = cheerio.load(html);
-  const tables = $('table.tbl-xsmn');
+  const tables = $('table[class*="tbl-xsmn"], table[class*="tbl-xsmt"]');
   const results = [];
 
   tables.each((_, table) => {
@@ -428,7 +428,14 @@ async function crawl({ regions, from, to, db, phpProxyUrl, phpPushSecret, onLog 
             body: JSON.stringify(payload),
           });
 
-          const json = await res.json();
+          const text = await res.text();
+          let json;
+          try {
+            json = JSON.parse(text);
+          } catch (err) {
+            throw new Error(`Invalid JSON from PHP: ${text.substring(0, 100)}...`);
+          }
+
           if (json.ok) {
             saved += json.saved || records.length;
             onLog(`✅ [${region.toUpperCase()}] ${dateStr} — PHP lưu ${json.saved} tỉnh`);
