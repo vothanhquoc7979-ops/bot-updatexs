@@ -50,9 +50,10 @@ async function generateGeminiMessage(apiKey) {
 }
 
 async function postForumMessage() {
-    const phpProxyUrl = storage.get('php_server_url');
+    const phpProxyUrl = storage.get('php_server_url') || process.env.PHP_PROXY_URL;
     if (!phpProxyUrl) {
-      console.log("[AutoForumBot] Chưa cấu hình PHP Server URL (proxy). Bot ngừng hoạt động.");
+      console.log("[AutoForumBot] Chưa cấu hình PHP Server URL (proxy). Đợi 1 phút kiểm tra lại...");
+      setTimeout(postForumMessage, 60000);
       return;
     }
     // Gateway lưu tin nhắn Diễn đàn
