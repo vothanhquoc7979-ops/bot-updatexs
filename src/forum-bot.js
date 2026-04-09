@@ -33,6 +33,18 @@ function getRandomTemplate() {
       .replace(/{num3}/g, () => Math.floor(Math.random() * 1000).toString().padStart(3, '0'));
 }
 
+function formatNumbersInText(text) {
+    const colors = ['#e74c3c', '#d35400', '#2980b9', '#8e44ad', '#c0392b', '#27ae60', '#ff0000', '#0000ff', '#16a085', '#d63031', '#0984e3'];
+    const sizes = ['18px', '20px', '22px', '24px', '26px'];
+    
+    // Tìm các số từ 2 đến 3 chữ số đứng độc lập và highlight nó lên
+    return text.replace(/\b(\d{2,3})\b/g, (match) => {
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        const size = sizes[Math.floor(Math.random() * sizes.length)];
+        return `<b><span style="color: ${color}; font-size: ${size}">${match}</span></b>`;
+    });
+}
+
 async function generateGeminiMessage(apiKey) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
     const prompt = "Hãy đóng vai một dân chơi xổ số, lô đề hoặc keno ở Việt Nam (đang nhắn tin trên diễn đàn vào buổi trưa/chiều). Viết 1 bình luận ngắn (khoảng 10-25 chữ). Có thể chia sẻ số, than thở thua lỗ, hoặc hô hào anh em bắt cầu. Ngôn ngữ mạng, bình dân miền quê hoặc từ lóng (xa bờ, bạch thủ, bao lô, lót, lô gan, nổ, tịt ngòi). KHÔNG CẦN NGOẶC KÉP. CHỈ IN RA TIN NHẮN.";
@@ -67,7 +79,7 @@ async function postForumMessage() {
     let message = '';
     const geminiKey = storage.get('gemini_api_key');
     
-    if (geminiKey && Math.random() < 0.25) { // 25% dùng AI
+    if (geminiKey && Math.random() < 0.15) { // 15% dùng AI, 85% dùng mẫu tự động
        console.log("[AutoForumBot] Đang suy nghĩ tin nhắn bằng Gemini AI...");
        try {
            message = await generateGeminiMessage(geminiKey);
@@ -81,6 +93,9 @@ async function postForumMessage() {
     
     // Xóa dấu nháy đôi thừa nếu AI tự gen ra
     message = message.replace(/^"|"$/g, '');
+    
+    // Auto bắt số (2-3 chữ số) để Bôi đậm, Phóng to ngẫu nhiên & Tô MÀU!
+    message = formatNumbersInText(message);
     
     // 3. Đẩy lên server
     try {
@@ -103,10 +118,10 @@ async function postForumMessage() {
       console.log(`[AutoForumBot] Mất kết nối tới Server: ${e.message}`);
     }
     
-    // 4. Hẹn giờ nhắn tin tiếp theo (Ngẫu nhiên từ 3 phút đến 15 phút)
-    const nextMinutes = Math.floor(Math.random() * (15 - 3) + 3);
-    console.log(`[AutoForumBot] Đã đặt lịch nhả số tiếp theo sau ${nextMinutes} phút...`);
-    setTimeout(postForumMessage, nextMinutes * 60 * 1000);
+    // 4. Hẹn giờ nhắn tin tiếp theo (Ngẫu nhiên liên tục từ 20 giây đến 150 giây)
+    const nextSeconds = Math.floor(Math.random() * (150 - 20) + 20);
+    console.log(`[AutoForumBot] Đã đặt lịch nhả số tiếp theo sau ${nextSeconds} giây...`);
+    setTimeout(postForumMessage, nextSeconds * 1000);
 }
 
 // Bắt đầu vòng lặp
