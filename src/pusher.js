@@ -38,24 +38,20 @@ function resolveDrawDate(region) {
 
 // ─── Push data sang PHP hosting ────────────────────────────
 async function pushToWeb(region, results) {
-  const PHP_HOST   = process.env.PHP_HOST        || require('./storage').get('php_host')        || '';
-  const PHP_SECRET = process.env.PHP_PUSH_SECRET || require('./storage').get('php_push_secret') || '';
+  const phpProxyUrl = require('./storage').get('php_server_url') || process.env.PHP_PROXY_URL || '';
+  const PHP_SECRET  = require('./storage').get('php_push_secret') || process.env.BOT_PUSH_SECRET || '';
 
-  if (!PHP_HOST) {
-    const ph = process.env.PHP_HOST || '';
-    const sh = require('./storage').get('php_host') || '';
-    console.warn('[Pusher] PHP_HOST chua cau hinh (env="' + ph + '", storage="' + sh + '"), bo qua push.');
+  if (!phpProxyUrl) {
+    console.warn('[Pusher] PHP_PROXY_URL chưa cấu hình, bỏ qua push.');
     return false;
   }
   if (!PHP_SECRET) {
-    const ps = process.env.PHP_PUSH_SECRET || '';
-    const ss = require('./storage').get('php_push_secret') || '';
-    console.warn('[Pusher] PHP_PUSH_SECRET chua cau hinh (env="' + ps + '", storage="' + ss + '"), bo qua push.');
+    console.warn('[Pusher] BOT_PUSH_SECRET chưa cấu hình, bỏ qua push.');
     return false;
   }
 
   const drawDate = resolveDrawDate(region);
-  const url = PHP_HOST.replace(/\/$/, '') + '/api/live-push.php';
+  const url = phpProxyUrl.replace('/crawl-save.php', '/live-push.php');
 
   try {
     const controller = new AbortController();
