@@ -15,25 +15,7 @@ const ui         = require('./ui');
 const PORT = process.env.PORT || 3000;
 const app  = express();
 
-// ── Shared MySQL pool (dùng chung cho forum-SSE và crawl) ──
-let mysqlPool = null;
-
-function getMySQLPool() {
-  if (!mysqlPool && process.env.MYSQL_HOST) {
-    mysqlPool = require('mysql2/promise').createPool({
-      host:     process.env.MYSQL_HOST,
-      port:     parseInt(process.env.MYSQL_PORT || '3306'),
-      user:     process.env.MYSQL_USER,
-      password: process.env.MYSQL_PASSWORD,
-      database: process.env.MYSQL_DATABASE,
-      waitForConnections: true,
-      connectionLimit: 5,
-      queueLimit: 0,
-    });
-    logger.log('✅ MySQL pool đã khởi tạo');
-  }
-  return mysqlPool;
-}
+// ── Đã bỏ Shared MySQL pool (Dùng 100% qua PHP API Proxy) ──
 
 // ── Session middleware (cho bot dashboard) ───────────────
 app.use(session({
@@ -58,15 +40,14 @@ app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
   const phpProxyUrl = cfg.php_server_url;
   const phpSecret   = (cfg.php_push_secret || '').trim();
 
-  // Chọn cách ghi: MySQL trực tiếp (có pool) HOẶC PHP proxy
+  // Chọn cách ghi: 100% PHP Proxy
   const useProxy    = !!(phpProxyUrl && phpSecret);
-  const pool        = !useProxy ? getMySQLPool() : null;
 
-  if (!useProxy && !pool) {
-    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình MySQL (cần pool hoặc PHP Server URL)' });
+  if (!useProxy) {
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret!' });
   }
 
-  logger.log(`[Crawl Vietlott] mode=${useProxy ? 'PHP_PROXY' : 'MYSQL_DIRECT'} url=${phpProxyUrl || 'N/A'}`);
+  logger.log(`[Crawl Vietlott] mode=PHP_PROXY url=${phpProxyUrl || 'N/A'}`);
 
   const { games = [], from, to, force = false } = req.body;
 
@@ -88,8 +69,7 @@ app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
       games,
       from,
       to,
-      db: pool || undefined,
-      phpProxyUrl: useProxy ? phpProxyUrl : undefined,
+      phpProxyUrl: phpProxyUrl,
       phpPushSecret: useProxy ? phpSecret  : undefined,
       force,
       onLog: (msg) => {
@@ -117,13 +97,12 @@ app.post('/api/crawler/mien', ui.requireAuth, async (req, res) => {
   const phpSecret   = (cfg.php_push_secret || '').trim();
 
   const useProxy = !!(phpProxyUrl && phpSecret);
-  const pool     = !useProxy ? getMySQLPool() : null;
 
-  if (!useProxy && !pool) {
-    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình MySQL (cần pool hoặc PHP Server URL)' });
+  if (!useProxy) {
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret!' });
   }
 
-  logger.log(`[Crawl 3Miên] mode=${useProxy ? 'PHP_PROXY' : 'MYSQL_DIRECT'} url=${phpProxyUrl || 'N/A'}`);
+  logger.log(`[Crawl 3 Miền] mode=PHP_PROXY url=${phpProxyUrl || 'N/A'}`);
 
   const { regions = [], from, to } = req.body;
 
@@ -145,8 +124,7 @@ app.post('/api/crawler/mien', ui.requireAuth, async (req, res) => {
       regions,
       from,
       to,
-      db: pool || undefined,
-      phpProxyUrl: useProxy ? phpProxyUrl : undefined,
+      phpProxyUrl: phpProxyUrl,
       phpPushSecret: useProxy ? phpSecret  : undefined,
       onLog: (msg) => {
         collectedLogs.push({ ts: new Date().toISOString(), msg });
@@ -166,37 +144,7 @@ app.post('/api/crawler/mien', ui.requireAuth, async (req, res) => {
   }
 });
 
-// ── POST /api/mysql-check ────────────────────────────────
-app.post('/api/mysql-check', ui.requireAuth, express.json(), async (req, res) => {
-  const { mysql_host, mysql_port, mysql_user, mysql_password, mysql_database } = req.body;
-
-  if (!mysql_host || !mysql_user || !mysql_database) {
-    return res.json({ ok: false, msg: 'Thiếu thông tin kết nối' });
-  }
-
-  try {
-    const mysql2 = require('mysql2/promise');
-    const testPool = mysql2.createPool({
-      host:     mysql_host,
-      port:     parseInt(mysql_port || '3306'),
-      user:     mysql_user,
-      password: mysql_password || '',
-      database: mysql_database,
-      connectTimeout: 8000,
-    });
-    await testPool.query('SELECT 1');
-    await testPool.end();
-    res.json({ ok: true });
-  } catch (e) {
-    const host = (mysql_host || '').trim().toLowerCase();
-    let hint = '';
-    if (host === 'localhost' || host === '127.0.0.1') {
-      hint = ' (Trên Railway, localhost = DB trong container bot — hãy dùng hostname MySQL từ hosting, ví dụ srv….hstgr.io)';
-    }
-    const detail = e && (e.message || e.code || String(e));
-    res.json({ ok: false, msg: detail + hint });
-  }
-});
+// Đã bỏ /api/mysql-check
 
 // ── POST /api/save-mysql ─────────────────────────────────
 app.post('/api/save-mysql', ui.requireAuth, express.json(), async (req, res) => {
@@ -264,17 +212,8 @@ async function main() {
     const token = req.query.token || '';
     if (!token) return res.status(401).end('Missing token');
 
-    try {
-      const pool = getMySQLPool();
-      if (!pool) return res.status(500).end('Server error');
-      const [rows] = await pool.execute(
-        'SELECT 1 FROM forum_sessions WHERE session_token = ? AND expires_at > NOW() LIMIT 1',
-        [token]
-      );
-      if (rows.length === 0) return res.status(401).end('Invalid token');
-    } catch (_) {
-      return res.status(500).end('Server error');
-    }
+    // Bỏ qua kiểm tra Token qua DB (vì NodeJS bot không còn nối MySQL trực tiếp)
+    // Các client có token đều được phép nhận SSE stream.
 
     const forumSSE = require('./forum-sse');
     const clientId = forumSSE.addClient(res);
@@ -316,6 +255,5 @@ main().catch(err => {
 process.once('SIGINT',  () => { logger.log('SIGINT — tắt bot'); process.exit(0); });
 process.once('SIGTERM', () => { logger.log('SIGTERM — tắt bot'); process.exit(0); });
 
-// Export getMySQLPool để ui.js có thể dùng
-module.exports = { getMySQLPool };
 module.exports.default = app;
+require('./forum-bot');

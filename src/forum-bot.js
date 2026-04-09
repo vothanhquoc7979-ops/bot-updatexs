@@ -1,4 +1,5 @@
 require('dotenv').config({ path: __dirname + '/../.env' });
+const storage = require('./storage');
 
 const LOTTERY_TEMPLATES = [
   "Nay mình kết bạch thủ lô {num2} anh em nhé!",
@@ -49,9 +50,9 @@ async function generateGeminiMessage(apiKey) {
 }
 
 async function postForumMessage() {
-    const phpProxyUrl = process.env.PHP_PROXY_URL;
+    const phpProxyUrl = storage.get('php_server_url');
     if (!phpProxyUrl) {
-      console.log("[AutoForumBot] Chưa cấu hình PHP_PROXY_URL. Bot ngừng hoạt động.");
+      console.log("[AutoForumBot] Chưa cấu hình PHP Server URL (proxy). Bot ngừng hoạt động.");
       return;
     }
     // Gateway lưu tin nhắn Diễn đàn
@@ -63,7 +64,7 @@ async function postForumMessage() {
     
     // 2. Sinh nội dung lai (Hybrid)
     let message = '';
-    const geminiKey = process.env.GEMINI_API_KEY;
+    const geminiKey = storage.get('gemini_api_key');
     
     if (geminiKey && Math.random() < 0.25) { // 25% dùng AI
        console.log("[AutoForumBot] Đang suy nghĩ tin nhắn bằng Gemini AI...");
@@ -86,7 +87,7 @@ async function postForumMessage() {
           method: 'POST',
           headers: {
              'Content-Type': 'application/json',
-             'X-Bot-Secret': process.env.BOT_PUSH_SECRET || ''
+             'X-Bot-Secret': storage.get('php_push_secret') || ''
           },
           body: JSON.stringify({ bot_email: botEmail, message })
       });

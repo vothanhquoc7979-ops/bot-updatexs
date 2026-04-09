@@ -147,18 +147,7 @@ router.get('/api/status', requireAuth, (req, res) => {
   });
 });
 
-// ── GET /api/mysql-check ──────────────────────────────────
-router.get('/api/mysql-check', requireAuth, async (req, res) => {
-  try {
-    const { getMySQLPool } = require('../index.js');
-    const pool = getMySQLPool();
-    if (!pool) return res.json({ ok: false, msg: 'Chưa cấu hình MYSQL_HOST env' });
-    await pool.query('SELECT 1');
-    return res.json({ ok: true });
-  } catch (e) {
-    res.json({ ok: false, msg: e.message });
-  }
-});
+// Đã bỏ route /api/mysql-check
 
 // ── GET /api/logs ─────────────────────────────────────────
 router.get('/api/logs', requireAuth, (req, res) => {
@@ -197,13 +186,14 @@ router.post('/api/control', requireAuth, express.json(), (req, res) => {
 // ── POST /api/save-config ─────────────────────────────────
 router.post('/api/save-config', requireAuth, express.json(), async (req, res) => {
   try {
-    const { telegram_bot_token, telegram_chat_id, php_host, php_push_secret, php_server_url, auto_schedule } = req.body;
+    const { telegram_bot_token, telegram_chat_id, php_host, php_push_secret, php_server_url, auto_schedule, gemini_api_key } = req.body;
     storage.save({
       telegram_bot_token: (telegram_bot_token || '').trim(),
       telegram_chat_id:   (telegram_chat_id   || '').trim(),
       php_host:           (php_host           || '').trim().replace(/\/$/, ''),
       php_push_secret:    (php_push_secret    || '').trim(),
       php_server_url:     (php_server_url     || '').trim().replace(/\/$/, ''),
+      gemini_api_key:     (gemini_api_key     || '').trim(),
       auto_schedule:      auto_schedule === true || auto_schedule === 'true',
     });
     logger.log('✅ Đã lưu cấu hình mới. Restarting bot...');
@@ -338,6 +328,12 @@ router.get('/', requireAuth, (req, res) => {
                     value="${cfg.telegram_chat_id || ''}"
                     placeholder="-100123456789 hoặc @username">
                 </div>
+                <div class="form-group">
+                  <label>Gemini API Key (Dành cho Auto-Chat Bot AI)</label>
+                  <input type="password" name="gemini_api_key" id="f-gemini"
+                    value="${cfg.gemini_api_key || ''}"
+                    placeholder="AIzaSyAxxxxxxxxxxxxxxxx">
+                </div>
               </div>
               <div>
                 <div class="form-group">
@@ -376,55 +372,6 @@ router.get('/', requireAuth, (req, res) => {
 
       <!-- ═══════════════ TAB: CRAWL DỮ LIỆU ═══════════════ -->
       <div id="panel-crawl" style="display:none">
-
-        <!-- Cấu hình MySQL -->
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-hd">🗄️ Cấu hình MySQL <span style="font-size:11px;color:var(--muted);font-weight:400">(dùng chung database với website)</span></div>
-          <div class="card-body">
-            <form id="mysql-form">
-              <div class="grid" style="grid-template-columns:1fr 1fr">
-                <div class="form-group">
-                  <label>MySQL Host</label>
-                  <input type="text" id="m-host" placeholder="vd: srv123.hstgr.io (KHÔNG dùng localhost)" value="${cfg.mysql_host || ''}">
-                </div>
-                <div class="form-group">
-                  <label>MySQL Port <span style="color:var(--muted);font-weight:400">(mặc định 3306)</span></label>
-                  <input type="text" id="m-port" placeholder="3306" value="${cfg.mysql_port || ''}">
-                </div>
-                <div class="form-group">
-                  <label>MySQL User</label>
-                  <input type="text" id="m-user" placeholder="db_user" value="${cfg.mysql_user || ''}">
-                </div>
-                <div class="form-group">
-                  <label>MySQL Password</label>
-                  <input type="password" id="m-pass" placeholder="••••••••" value="${cfg.mysql_password || ''}">
-                </div>
-              </div>
-              <div class="form-group">
-                <label>MySQL Database</label>
-                <input type="text" id="m-db" placeholder="your_db_name" value="${cfg.mysql_database || ''}">
-              </div>
-              <p style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:12px">
-                Bot chạy trên <strong>Railway</strong> — <code>localhost</code> là máy Railway, <strong>không phải</strong> máy Hostinger.
-                Trong hPanel → <strong>Websites → Databases</strong> (hoặc MySQL Remote), copy <strong>Hostname</strong> thật (vd. <code>srv….hstgr.io</code>).
-                Bật <strong>Remote MySQL</strong> và cho phép host <code>%</code> (hoặc IP egress của Railway) nếu host chặn kết nối ngoài.
-              </p>
-              <div style="display:flex;gap:10px;align-items:center">
-                <button type="button" class="btn btn-blue" onclick="testMysql()">🔗 Test kết nối</button>
-                <button type="submit" class="btn btn-primary">💾 Lưu MySQL</button>
-                <span id="mysql-status" style="font-size:13px;color:var(--muted)"></span>
-              </div>
-            </form>
-          </div>
-        </div>
-
-        <!-- Trạng thái kết nối -->
-        <div id="mysql-warn" class="alert alert-err" style="display:none;margin-bottom:16px">
-          ⚠️ <strong>Chưa kết nối MySQL!</strong> Vui lòng điền thông tin bên trên và bấm <strong>Lưu MySQL</strong>.
-        </div>
-        <div id="mysql-ok" class="alert alert-ok" style="display:none;margin-bottom:16px">
-          ✅ Đã kết nối MySQL — Dữ liệu sẽ lưu vào database
-        </div>
 
         <div class="card">
           <div class="card-hd">🎯 Chọn loại xổ số cần crawl</div>
@@ -502,79 +449,10 @@ router.get('/', requireAuth, (req, res) => {
       document.getElementById('panel-crawl').style.display     = name === 'crawl'     ? '' : 'none';
       document.getElementById('tab-dashboard').className = 'tab-btn' + (name === 'dashboard' ? ' active' : '');
       document.getElementById('tab-crawl').className     = 'tab-btn' + (name === 'crawl'     ? ' active' : '');
-      if (name === 'crawl') {
-        checkMySQLStatus();
-      }
+      // none navigator
     }
 
-    // ── Check MySQL status ────────────────────────────────
-    async function checkMySQLStatus() {
-      try {
-        const r = await fetch('/api/mysql-check');
-        const d = await r.json();
-        document.getElementById('mysql-warn').style.display = d.ok ? 'none' : '';
-        document.getElementById('mysql-ok').style.display   = d.ok ? '' : 'none';
-      } catch (_) {
-        document.getElementById('mysql-warn').style.display = '';
-        document.getElementById('mysql-ok').style.display   = 'none';
-      }
-    }
-
-    // ── MySQL form ────────────────────────────────────────
-    document.getElementById('mysql-form').addEventListener('submit', async e => {
-      e.preventDefault();
-      const body = {
-        mysql_host:     document.getElementById('m-host').value,
-        mysql_port:     document.getElementById('m-port').value,
-        mysql_user:     document.getElementById('m-user').value,
-        mysql_password: document.getElementById('m-pass').value,
-        mysql_database: document.getElementById('m-db').value,
-      };
-      const r = await fetch('/api/save-mysql', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const d = await r.json();
-      const statusEl = document.getElementById('mysql-status');
-      if (d.ok) {
-        statusEl.textContent = '✅ Đã lưu! Đang test kết nối...';
-        statusEl.style.color = '#4caf50';
-        checkMySQLStatus();
-        setTimeout(() => { statusEl.textContent = ''; }, 4000);
-      } else {
-        statusEl.textContent = '❌ Lỗi: ' + (d.msg || '');
-        statusEl.style.color = '#ef5350';
-      }
-    });
-
-    async function testMysql() {
-      const statusEl = document.getElementById('mysql-status');
-      statusEl.textContent = '⏳ Đang test...';
-      statusEl.style.color = 'var(--muted)';
-      const body = {
-        mysql_host:     document.getElementById('m-host').value,
-        mysql_port:     document.getElementById('m-port').value,
-        mysql_user:     document.getElementById('m-user').value,
-        mysql_password: document.getElementById('m-pass').value,
-        mysql_database: document.getElementById('m-db').value,
-      };
-      const r = await fetch('/api/mysql-check', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const d = await r.json();
-      if (d.ok) {
-        statusEl.textContent = '✅ Kết nối thành công!';
-        statusEl.style.color = '#4caf50';
-        document.getElementById('mysql-warn').style.display = 'none';
-        document.getElementById('mysql-ok').style.display   = '';
-      } else {
-        statusEl.textContent = '❌ Kết nối thất bại: ' + (d.msg || '');
-        statusEl.style.color = '#ef5350';
-        document.getElementById('mysql-warn').style.display = '';
-        document.getElementById('mysql-ok').style.display   = 'none';
-      }
-    }
+    // Đã bỏ Javascript checkMySQLStatus và testMysql
 
     // ── Poll status mỗi 5s ──────────────────────────────
     async function fetchStatus() {
@@ -658,6 +536,7 @@ router.get('/', requireAuth, (req, res) => {
         php_host:           fd.get('php_host'),
         php_push_secret:    fd.get('php_push_secret'),
         php_server_url:     fd.get('php_server_url'),
+        gemini_api_key:     fd.get('gemini_api_key'),
         auto_schedule:      fd.get('auto_schedule') === 'true',
       };
       const r = await fetch('/api/save-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
