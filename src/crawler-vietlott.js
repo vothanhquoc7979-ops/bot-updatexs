@@ -250,21 +250,8 @@ async function fetchKeno(dateStr) {
     if (parts.length >= 10) sets.push(parts.slice(0, 20).join(','));
   }
 
-  // Fallback: tìm bất kỳ chuỗi nào có 10-20 số trong khoảng 1-80
-  if (sets.length === 0) {
-    const allNums = [];
-    const re = /\b(\d{1,2})\b/g;
-    let match;
-    while ((match = re.exec(html)) !== null) {
-      const n = parseInt(match[1]);
-      if (n >= 1 && n <= 80) allNums.push(n);
-    }
-    // Nhóm thành từng bộ 20
-    for (let i = 0; i + 20 <= allNums.length; i += 20) {
-      const set = allNums.slice(i, i + 20).map(n => String(n).padStart(2, '0')).join(',');
-      sets.push(set);
-    }
-  }
+  // Xóa fallback do fallback tự động bắt số linh tinh trên web vào ngày ko có giải 
+  // (tránh tạo hàng trăm giải giả làm nghẽn Server / ModSecurity)
 
   // Mỗi set = 1 kỳ Keno
   const now = new Date();
