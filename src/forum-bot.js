@@ -88,7 +88,7 @@ async function postForumMessage() {
           method: 'POST',
           headers: {
              'Content-Type': 'application/json',
-             'X-Bot-Secret': storage.get('php_push_secret') || ''
+             'X-Bot-Secret': storage.get('php_push_secret') || process.env.BOT_PUSH_SECRET || ''
           },
           body: JSON.stringify({ bot_email: botEmail, message })
       });
