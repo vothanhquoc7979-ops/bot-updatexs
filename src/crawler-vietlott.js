@@ -64,11 +64,32 @@ async function fetchVietlottGame(gameType, dateStr, urlSlug, maxN, expectedBalls
 
   // 2) Jackpot
   let jackpot = null;
-  let jpMatch = allText.match(/Jackpot[^0-9]*([\d.,]{5,})\s*(?:vn[đd]|đ|\bvnd\b)/i);
-  if (!jpMatch) jpMatch = allText.match(/([\d.,]{7,})\s*(?:vn[đd]|đ|\bvnd\b)/i);
-  if (jpMatch) jackpot = jpMatch[1].replace(/[^0-9]/g, '');
-
   let jackpot2 = null;
+
+  // Lấy Jackpot qua thẻ bảng thống kê trúng giải (chuẩn xác nhất)
+  const tableTrungGiai = $('table.trunggiai');
+  if (tableTrungGiai.length > 0) {
+    tableTrungGiai.find('tr').each((_, tr) => {
+      const tds = $(tr).find('td');
+      if (tds.length >= 4) {
+        let label = $(tds[0]).text().toLowerCase().trim();
+        let amount = $(tds[3]).text().replace(/[^0-9]/g, '');
+        
+        if (label === 'j.pot' || label === 'jackpot' || label === 'j.pot 1' || label === 'jackpot 1') {
+          if (amount.length > 5) jackpot = amount;
+        } else if (label === 'j.pot 2' || label === 'jackpot 2') {
+          if (amount.length > 5) jackpot2 = amount;
+        }
+      }
+    });
+  }
+
+  // Fallback lấy bằng Regex
+  if (!jackpot) {
+    let jpMatch = allText.match(/Jackpot[^0-9]*([\d.,]{5,})\s*(?:vn[đd]|đ|\bvnd\b)/i);
+    if (!jpMatch) jpMatch = allText.match(/([\d.,]{7,})\s*(?:vn[đd]|đ|\bvnd\b)/i);
+    if (jpMatch) jackpot = jpMatch[1].replace(/[^0-9]/g, '');
+  }
 
   // 3) Numbers
   let candidates = [];
@@ -331,9 +352,26 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
 
   const useProxy = !!(phpProxyUrl && phpPushSecret);
 
+  const SCHEDULE = {
+    mega:     [0, 3, 5],     // CN, T4, T6
+    power:    [2, 4, 6],     // T3, T5, T7
+    max3d:    [1, 3, 5],     // T2, T4, T6
+    max3dpro: [2, 4, 6],     // T3, T5, T7
+    keno:     [0, 1, 2, 3, 4, 5, 6] // Mọi ngày
+  };
+
   for (const dateStr of dates) {
+    const dObj = new Date(dateStr);
+    const dayOfWeek = dObj.getDay();
+    const thuStr = dayOfWeek === 0 ? 'CN' : 'T' + (dayOfWeek + 1);
+
     for (const game of games) {
       try {
+        if (SCHEDULE[game] && !SCHEDULE[game].includes(dayOfWeek)) {
+          onLog(`[${game.toUpperCase()}] ⏭  Bỏ qua ${dateStr} (${thuStr} không quay)`);
+          continue;
+        }
+
         onLog(`[${game.toUpperCase()}] 🔍 Đang crawl ngày ${dateStr}...`);
         const records = await crawlGame(game, dateStr);
 
