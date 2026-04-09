@@ -1,5 +1,5 @@
 /**
- * crawler-vietlott.js — Crawl Vietlott từ kqxs.vn / xskt.com.vn / xosothantai.mobi
+ * crawler-vietlott.js — Crawl Vietlott từ ketquaxoso3.com
  *
  * Mỗi hàm fetch trả về object:
  * {
@@ -13,6 +13,7 @@
  */
 
 'use strict';
+const cheerio = require('cheerio');
 
 // ─── HTTP helper ──────────────────────────────────────────
 async function httpGet(url, timeout = 15000) {
@@ -37,130 +38,108 @@ async function httpGet(url, timeout = 15000) {
   }
 }
 
-// ─── Parse Mega 6/45 ────────────────────────────────────────
-/**
- * Nguồn: kqxs.vn/xo-so-mega645?date=dd-mm-yyyy
- * HTML chứa: 05 08 23 26 38 41, Jackpot, draw_number
- */
-async function fetchMega(dateStr) {
-  // dateStr = 'YYYY-MM-DD' → chuyển sang 'DD-MM-YYYY'
+// ─── Lấy KQXS Vietlott chung từ ketquaxoso3.com ────────────────────────────
+async function fetchVietlottGame(gameType, dateStr, urlSlug, maxN, expectedBalls) {
   const [y, m, d] = dateStr.split('-');
-  const url = `https://www.kqxs.vn/xo-so-mega645?date=${d}-${m}-${y}`;
+  const url = `https://ketquaxoso3.com/${urlSlug}/ngay-${d}-${m}-${y}`;
 
   const html = await httpGet(url);
-  if (!html) return null;
+  if (!html || html.length < 500) return null;
 
-  // 1) Số kỳ quay: #01494
-  const drawNumMatch = html.match(/Kỳ\s*quay[^<]*#?(\d+)/i)
-    || html.match(/(\d{5,})(?:\s*#|&num;)/)
-    || html.match(/#(\d+)/i);
-  const drawNumber = drawNumMatch ? '#' + drawNumMatch[1].replace(/\D/g, '').slice(-5) : null;
+  const $ = cheerio.load(html);
+  const allText = $('body').text().replace(/\s+/g, ' ');
 
-  // 2) 6 số kết quả: tìm 6 số trong cụm có 6 số 2 chữ số
-  // Pattern: số 2 chữ số liền nhau, cách nhau khoảng trắng hoặc <li>
-  const numMatch = html.match(/(?:result|numbers|kq)[^>]*>([\d\s<>,\/a-z]+(?:0?[1-9]\d?\s*){5,6})/i)
-    || html.match(/(\d{2}(?:\s*[,\/]\s*|\s+)\d{2}(?:\s*[,\/]\s*|\s+)\d{2}(?:\s*[,\/]\s*|\s+)\d{2}(?:\s*[,\/]\s*|\s+)\d{2}(?:\s*[,\/]\s*|\s+)\d{2})/i)
-    || html.match(/\b(\d{2}\s+\d{2}\s+\d{2}\s+\d{2}\s+\d{2}\s+\d{2})\b/);
-
-  let numbers = null;
-  if (numMatch) {
-    const raw = numMatch[1].replace(/[,\/]/g, ' ').replace(/\s+/g, ' ').trim();
-    const parts = raw.split(/\s+/).filter(p => p.length === 2);
-    if (parts.length === 6) {
-      numbers = parts.sort((a, b) => parseInt(a) - parseInt(b)).join(',');
+  // 1) Số kỳ quay: "#NNNNN"
+  let drawNumber = null;
+  $('a').each((_, el) => {
+    let txt = $(el).text().trim();
+    if (/^#(\d{3,6})/.test(txt)) {
+      drawNumber = '#' + txt.match(/^#(\d+)/)[1].padStart(5, '0');
     }
+  });
+  if (!drawNumber) {
+    let match = allText.match(/Kỳ\s*(?:MT|mở\s*thưởng)[^#]*#(\d{3,6})/i);
+    if (match) drawNumber = '#' + match[1].padStart(5, '0');
   }
 
-  // Fallback: tìm 6 số riêng lẻ gần nhau trong text
-  if (!numbers) {
-    const singleNums = [];
-    const regex = /\b(\d{2})\b/g;
-    let match;
-    while ((match = regex.exec(html)) !== null && singleNums.length < 20) {
-      const n = parseInt(match[1]);
-      if (n >= 1 && n <= 45) singleNums.push(match[1]);
-    }
-    // Lấy 6 số đầu tiên trong khoảng 1-45
-    const filtered = singleNums.filter(n => parseInt(n) >= 1 && parseInt(n) <= 45);
-    if (filtered.length >= 6) {
-      numbers = filtered.slice(0, 6).sort((a, b) => parseInt(a) - parseInt(b)).join(',');
-    }
-  }
+  // 2) Jackpot
+  let jackpot = null;
+  let jpMatch = allText.match(/Jackpot[^0-9]*([\d.,]{5,})\s*(?:vn[đd]|đ|\bvnd\b)/i);
+  if (!jpMatch) jpMatch = allText.match(/([\d.,]{7,})\s*(?:vn[đd]|đ|\bvnd\b)/i);
+  if (jpMatch) jackpot = jpMatch[1].replace(/[^0-9]/g, '');
 
-  // 3) Jackpot: "72.718.091.500"
-  const jackpotMatch = html.match(/(?:jackpot|giải\s*đặc\s*biệt)[^0-9]*([\d\.]+)/i)
-    || html.match(/([\d]{1,3}\.[\d]{3}\.[\d]{3}\.[\d]{3})/);
-  const jackpot = jackpotMatch ? jackpotMatch[1].trim() : null;
+  let jackpot2 = null;
 
-  if (!numbers) return null;
-
-  return {
-    game_type: 'mega645',
-    draw_date: dateStr,
-    draw_number: drawNumber,
-    numbers,
-    power_ball: null,
-    jackpot,
-    jackpot2: null,
-    prizes: null,
-  };
-}
-
-// ─── Parse Power 6/55 ─────────────────────────────────────
-/**
- * Nguồn: kqxs.vn/xo-so-power655?date=dd-mm-yyyy
- * HTML chứa: 6 số + số đặc biệt (power ball) + 2 jackpot
- */
-async function fetchPower(dateStr) {
-  const [y, m, d] = dateStr.split('-');
-  const url = `https://www.kqxs.vn/xo-so-power655?date=${d}-${m}-${y}`;
-
-  const html = await httpGet(url);
-  if (!html) return null;
-
-  // 1) Số kỳ quay
-  const drawNumMatch = html.match(/#(\d+)/i) || html.match(/(\d{5,})/);
-  const drawNumber = drawNumMatch ? '#' + drawNumMatch[1].replace(/\D/g, '').slice(-5) : null;
-
-  // 2) 7 số (6 số chính + power ball) — tìm chuỗi có 6-7 số 2 chữ số
-  const numMatch = html.match(
-    /\b(\d{2}\s+\d{2}\s+\d{2}\s+\d{2}\s+\d{2}\s+\d{2}(?:\s+\d{2})?)\b/
-  );
-  let numbers = null;
+  // 3) Numbers
+  let candidates = [];
   let power_ball = null;
 
-  if (numMatch) {
-    const parts = numMatch[1].trim().split(/\s+/);
-    if (parts.length >= 6) {
-      numbers = parts.slice(0, 6).sort((a, b) => parseInt(a) - parseInt(b)).join(',');
-      if (parts.length >= 7) power_ball = parts[6];
+  // Strategy A: Tìm row "Kết quả"
+  $('tr').each((_, tr) => {
+    if (candidates.length >= expectedBalls) return;
+    const tds = $(tr).find('td');
+    let firstText = $(tds[0]).text().toLowerCase();
+    if (firstText.includes('kết quả') || firstText.includes('ket qua')) {
+      let numText = '';
+      for (let i = 1; i < tds.length; i++) {
+        numText += ' ' + $(tds[i]).text();
+      }
+      let matches = numText.match(/\b(\d{2})\b/g) || [];
+      let valid = matches.map(n => n).filter(n => parseInt(n) >= 1 && parseInt(n) <= maxN);
+      if (valid.length >= expectedBalls) {
+        candidates = valid.slice(0, expectedBalls + 1);
+      }
     }
+  });
+
+  // Strategy B: Power 6/55 JP2
+  if (gameType === 'power655') {
+    $('tr').each((_, tr) => {
+      const tds = $(tr).find('td');
+      let firstText = $(tds[0]).text().toLowerCase();
+      if (firstText.includes('jp2')) {
+        let numText = '';
+        for (let i = 1; i < tds.length; i++) {
+          numText += ' ' + $(tds[i]).text();
+        }
+        let matches = numText.match(/\b(\d{1,2})\b/g) || [];
+        for (let n of matches) {
+          let npad = n.padStart(2, '0');
+          if (parseInt(n) >= 1 && parseInt(n) <= 55 && !candidates.includes(npad)) {
+            power_ball = npad;
+            break;
+          }
+        }
+      }
+    });
+
+    let j2Match = allText.match(/Jp[oo]t2[^\d]*([\d.,]{5,})/i);
+    if (j2Match) jackpot2 = j2Match[1].replace(/[^0-9]/g, '');
   }
 
-  // Fallback: tìm 7 số trong khoảng 1-55
-  if (!numbers) {
-    const allNums = [];
-    const regex = /\b(\d{1,2})\b/g;
-    let match;
-    while ((match = regex.exec(html)) !== null) {
-      const n = parseInt(match[1]);
-      if (n >= 1 && n <= 55) allNums.push(match[1].padStart(2, '0'));
-    }
-    if (allNums.length >= 6) {
-      numbers = allNums.slice(0, 6).sort((a, b) => parseInt(a) - parseInt(b)).join(',');
-      if (allNums.length >= 7) power_ball = allNums[6];
-    }
+  // Strategy C: scan element lớn
+  if (candidates.length === 0) {
+    const els = $('tr, td, p, div');
+    els.each((_, el) => {
+      if (candidates.length >= expectedBalls) return;
+      let txt = $(el).text();
+      if (txt.length > 200) return;
+      let matches = txt.match(/\b(\d{2})\b/g) || [];
+      let valid = matches.map(n => n).filter(n => parseInt(n) >= 1 && parseInt(n) <= maxN);
+      if (valid.length === expectedBalls || valid.length === expectedBalls + 1) {
+        candidates = valid.slice(0, expectedBalls + 1);
+      }
+    });
   }
 
-  // 3) Jackpot 1 và Jackpot 2
-  const jpMatches = html.match(/([\d]{1,3}\.[\d]{3}\.[\d]{3}\.[\d]{3})/g) || [];
-  const jackpot = jpMatches[0] || null;
-  const jackpot2 = jpMatches[1] || null;
+  if (candidates.length < expectedBalls) {
+    return null;
+  }
 
-  if (!numbers) return null;
+  let numbers = candidates.slice(0, expectedBalls).join(',');
 
   return {
-    game_type: 'power655',
+    game_type: gameType,
     draw_date: dateStr,
     draw_number: drawNumber,
     numbers,
@@ -171,57 +150,76 @@ async function fetchPower(dateStr) {
   };
 }
 
-// ─── Parse Max 3D ─────────────────────────────────────────
-/**
- * Nguồn: xskt.com.vn/xsmax3d/ngay-dd-mm-yyyy.html
- * HTML: Giải ĐB → "865 063", Giải Nhất → "433 485", v.v.
- * Tất cả giải lưu dạng string, nhiều cặp cách nhau "|"
- */
-async function fetchMax3D(dateStr) {
+async function fetchMega(dateStr) {
+  return await fetchVietlottGame('mega645', dateStr, 'xsmega645', 45, 6);
+}
+
+async function fetchPower(dateStr) {
+  return await fetchVietlottGame('power655', dateStr, 'xspower655', 55, 6);
+}
+
+// ─── Parse Max 3D / Max 3D Pro ────────────────────────────────────
+async function fetchVietlottMax(gameType, dateStr, urlSlug) {
   const [y, m, d] = dateStr.split('-');
-  const url = `https://xskt.com.vn/xsmax3d/ngay-${d}-${m}-${y}.html`;
+  const url = `https://ketquaxoso3.com/${urlSlug}/ngay-${d}-${m}-${y}`;
 
   const html = await httpGet(url);
-  if (!html) return null;
+  if (!html || html.length < 500) return null;
 
-  // Tìm số kỳ
-  const drawNumMatch = html.match(/#(\d+)/i);
-  const drawNumber = drawNumMatch ? '#' + drawNumMatch[1].replace(/\D/g, '').slice(-5) : null;
+  const $ = cheerio.load(html);
+  const allText = $('body').text().replace(/\s+/g, ' ');
 
-  // Parse giải: tìm bảng kết quả
-  // Pattern: số 3 chữ số trong bảng kết quả Max 3D
-  // Giải đặc biệt, nhất, nhì, ba, tư
-  function extractNumbers(html, label) {
-    const regex = new RegExp(
-      label + '[^\\d]*(\\d{3})(?:\\s+(\\d{3}))?(?:\\s+(\\d{3}))?',
-      'i'
-    );
-    const m = html.match(regex);
-    if (!m) return null;
-    return [m[1], m[2], m[3]].filter(Boolean).join(',');
+  let drawNumber = null;
+  $('a').each((_, el) => {
+    let txt = $(el).text().trim();
+    if (/^#(\d{3,6})/.test(txt)) {
+      drawNumber = '#' + txt.match(/^#(\d+)/)[1].padStart(5, '0');
+    }
+  });
+  if (!drawNumber) {
+    let match = allText.match(/Kỳ\s*(?:MT|mở\s*thưởng)[^#]*#(\d{3,6})/i);
+    if (match) drawNumber = '#' + match[1].padStart(5, '0');
   }
 
-  // Tìm tất cả số 3 chữ số gần nhau trong bảng kết quả
-  const threeDigitNums = [];
-  const re = /\b(\d{3})\b/g;
-  let match;
-  while ((match = re.exec(html)) !== null) {
-    threeDigitNums.push(match[1]);
+  // Khác với Mega/Power, ở đây ta cần lấy hết table td và scan text theo pattern (3 chữ số)
+  let threeDigits = [];
+  $('td').each((_, td) => {
+    let txt = $(td).text().trim();
+    if (/^(\d{3})$/.test(txt)) {
+      let n = parseInt(txt);
+      if (n >= 0 && n <= 999 && !(n >= 2020 && n <= 2030)) {
+        threeDigits.push(txt.padStart(3, '0'));
+      }
+    }
+  });
+
+  if (threeDigits.length < 2) {
+    let m = allText.match(/(?<![0-9\/\-])(\d{3})(?![0-9])/g) || [];
+    for (let txt of m) {
+      let n = parseInt(txt);
+      if (n >= 0 && n <= 999 && !(n >= 2020 && n <= 2030)) {
+        threeDigits.push(txt.padStart(3, '0'));
+      }
+    }
+    threeDigits = [...new Set(threeDigits)].slice(0, 40);
   }
 
-  // Giải ĐB (3 số đầu tiên 3 chữ số trong bảng)
-  const prize_db = threeDigitNums[0] ? threeDigitNums[0] : null;
+  if (threeDigits.length < 2) return null;
 
-  // Build numbers string: tất cả số cách nhau "|"
-  const numbers = threeDigitNums.slice(0, 20).join('|');
+  let maxPairs = 10;
+  let nums = threeDigits.slice(0, maxPairs * 2);
+  let pairs = [];
+  for (let i = 0; i + 1 < nums.length; i += 2) {
+    pairs.push(nums[i] + ',' + nums[i + 1]);
+  }
 
-  if (!prize_db) return null;
+  if (pairs.length === 0) return null;
 
   return {
-    game_type: 'max3d',
+    game_type: gameType,
     draw_date: dateStr,
     draw_number: drawNumber,
-    numbers,
+    numbers: pairs.join('|'),
     power_ball: null,
     jackpot: null,
     jackpot2: null,
@@ -229,42 +227,12 @@ async function fetchMax3D(dateStr) {
   };
 }
 
-// ─── Parse Max 3D Pro ─────────────────────────────────────
-/**
- * Nguồn: xskt.com.vn/xsmax3dpro/ngay-dd-mm-yyyy.html
- */
+async function fetchMax3D(dateStr) {
+  return await fetchVietlottMax('max3d', dateStr, 'xsmax3d');
+}
+
 async function fetchMax3DPro(dateStr) {
-  const [y, m, d] = dateStr.split('-');
-  const url = `https://xskt.com.vn/xsmax3dpro/ngay-${d}-${m}-${y}.html`;
-
-  const html = await httpGet(url);
-  if (!html) return null;
-
-  const drawNumMatch = html.match(/#(\d+)/i);
-  const drawNumber = drawNumMatch ? '#' + drawNumMatch[1].replace(/\D/g, '').slice(-5) : null;
-
-  const threeDigitNums = [];
-  const re = /\b(\d{3})\b/g;
-  let match;
-  while ((match = re.exec(html)) !== null) {
-    threeDigitNums.push(match[1]);
-  }
-
-  const prize_db = threeDigitNums[0] ? threeDigitNums[0] : null;
-  const numbers = threeDigitNums.slice(0, 20).join('|');
-
-  if (!prize_db) return null;
-
-  return {
-    game_type: 'max3dpro',
-    draw_date: dateStr,
-    draw_number: drawNumber,
-    numbers,
-    power_ball: null,
-    jackpot: null,
-    jackpot2: null,
-    prizes: null,
-  };
+  return await fetchVietlottMax('max3dpro', dateStr, 'xsmax3dpro');
 }
 
 // ─── Parse Keno ──────────────────────────────────────────
@@ -406,39 +374,41 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
 
           if (useProxy) {
             // ── Mode: gọi PHP proxy ───────────────────────────
-            const payload = {
-              type:        'vietlott',
-              game_type:   gameType,
-              draw_date:   r.draw_date,
-              draw_number: r.draw_number || '',
-              numbers:     r.numbers,
-              power_ball: r.power_ball || '',
-              jackpot:     r.jackpot    || '',
-              jackpot2:    r.jackpot2   || '',
-              prizes:      r.prizes     || [],
-            };
+            try {
+              const payload = {
+                type:        'vietlott',
+                game_type:   gameType,
+                draw_date:   r.draw_date,
+                draw_number: r.draw_number || '',
+                numbers:     r.numbers,
+                power_ball: r.power_ball || '',
+                jackpot:     r.jackpot    || '',
+                jackpot2:    r.jackpot2   || '',
+                prizes:      r.prizes     || [],
+              };
 
-            const res = await fetch(phpProxyUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Bot-Secret': phpPushSecret,
-              },
-              body: JSON.stringify(payload),
-            });
+              const res = await fetch(phpProxyUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Bot-Secret': phpPushSecret,
+                },
+                body: JSON.stringify(payload),
+              });
 
-            const json = await res.json();
-            if (json.ok) {
-              saved++;
-              onLog(`[${game.toUpperCase()}] ✅ PHP lưu ${r.draw_date} | ${r.draw_number || '?'}`);
-            } else {
+              const json = await res.json();
+              if (json.ok) {
+                saved++;
+                onLog(`[${game.toUpperCase()}] ✅ PHP lưu ${r.draw_date} | ${r.draw_number || '?'}`);
+              } else {
+                errors++;
+                onLog(`[${game.toUpperCase()}] ❌ PHP lỗi: ${json.error || '(không có chi tiết)'}`);
+              }
+            } catch (e) {
               errors++;
-              onLog(`[${game.toUpperCase()}] ❌ PHP lỗi: ${json.error || '(không có chi tiết)'}`);
+              onLog(`[${game.toUpperCase()}] ❌ HTTP lỗi ${r.draw_date}: ${e.message}`);
             }
-          } catch (e) {
-            errors++;
-            onLog(`[${game.toUpperCase()}] ❌ HTTP lỗi ${r.draw_date}: ${e.message}`);
-          }
+          } else {
             // ── Mode: ghi trực tiếp MySQL ─────────────────────
             if (force) {
               await db.execute(

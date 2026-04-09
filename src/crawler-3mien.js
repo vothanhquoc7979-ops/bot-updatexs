@@ -1,14 +1,15 @@
 /**
- * crawler-3mien.js — Crawl XSMN, XSMT, XSMB từ xskt.com.vn
+ * crawler-3mien.js — Crawl XSMN, XSMT, XSMB từ ketquaxoso3.com
  *
- * Logic y hệt crawler/crawl.php PHP,
+ * Logic y hệt crawler/crawl_history.php PHP,
  * port sang Node.js để chạy trong Bot UI.
  *
  * 2 chế độ:
  *  - crawlRss()   : nhanh, dùng RSS feed — chỉ crawl hôm nay
- *  - crawlByDate(): chậm, parse HTML xskt.com.vn — crawl theo khoảng ngày
+ *  - crawlByDate(): chậm, parse HTML ketquaxoso3.com — crawl theo khoảng ngày
  */
 'use strict';
+const cheerio = require('cheerio');
 
 // ─── HTTP helper ──────────────────────────────────────────
 async function httpGet(url, timeout = 20000) {
@@ -166,42 +167,72 @@ async function crawlRss(region, onLog) {
   return saved;
 }
 
-// ─── Parse HTML XSMB (xskt.com.vn/xsmb/ngay-dd-mm-yyyy.html) ──
+// ─── Parse HTML XSMB (ketquaxoso3.com/xsmb/ngay-d-m-yyyy) ──
 function parseHtmlMb(html, dateStr) {
-  const prizeMap = [
-    { labels: ['đặc biệt', 'đb', 'db'], col: 'prize_db' },
-    { labels: ['nhất', 'giải nhất'],     col: 'prize_1' },
-    { labels: ['nhì', 'giải nhì'],        col: 'prize_2' },
-    { labels: ['ba', 'giải ba'],          col: 'prize_3' },
-    { labels: ['tư', 'giải tư'],          col: 'prize_4' },
-    { labels: ['năm', 'giải năm'],        col: 'prize_5' },
-    { labels: ['sáu', 'giải sáu'],        col: 'prize_6' },
-    { labels: ['bảy', 'giải bảy'],        col: 'prize_7' },
-  ];
+  const $ = cheerio.load(html);
+  const table = $('table.result').first();
+  if (!table.length) return null;
+
+  const prizeMap = {
+    'giải đb': 'prize_db', 'đb': 'prize_db',
+    'giải nhất': 'prize_1', 'g1': 'prize_1',
+    'giải nhì': 'prize_2', 'g2': 'prize_2',
+    'giải ba': 'prize_3', 'g3': 'prize_3',
+    'giải tư': 'prize_4', 'g4': 'prize_4',
+    'giải năm': 'prize_5', 'g5': 'prize_5',
+    'giải sáu': 'prize_6', 'g6': 'prize_6',
+    'giải bảy': 'prize_7', 'g7': 'prize_7',
+  };
 
   const prizes = {};
+  table.find('tr').each((_, tr) => {
+    const tds = $(tr).find('td');
+    if (tds.length < 2) return;
 
-  // Tìm tất cả table row
-  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  let match;
-  while ((match = rowRegex.exec(html)) !== null) {
-    const tr = match[1];
-    const cells = tr.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || [];
-    if (cells.length < 2) continue;
-
-    const cellTexts = cells.map(c =>
-      c.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
-    );
-    const label = cellTexts[0].toLowerCase();
-    const nums  = cellTexts.slice(1).join(',').replace(/[^0-9,]/g, '').replace(/,+/g, ',').replace(/^,|,$/g, '');
-
-    for (const { labels, col } of prizeMap) {
-      if (labels.some(l => label.includes(l)) && nums) {
-        prizes[col] = nums;
-        break;
-      }
+    let label = ($(tds[0]).attr('title') || $(tds[0]).text()).trim().toLowerCase();
+    
+    let prizeKey = null;
+    for (const [k, v] of Object.entries(prizeMap)) {
+      if (label === k || label.includes(k)) { prizeKey = v; break; }
     }
-  }
+    if (!prizeKey) return;
+
+    const numCell = $(tds[1]);
+    let textPieces = [];
+    numCell.contents().each((_, el) => {
+      let t = $(el).text().trim();
+      if (t) textPieces.push(t);
+    });
+
+    let rawText = textPieces.join(' ');
+    let nums = rawText.replace(/[^0-9 ]/g, ' ').replace(/\s+/g, ',').trim();
+    if (nums.startsWith(',')) nums = nums.slice(1);
+    if (nums.endsWith(',')) nums = nums.slice(0, -1);
+
+    const expectedDigits = {
+      'prize_db': 5, 'prize_1': 5, 'prize_2': 5,
+      'prize_3': 5, 'prize_4': 4, 'prize_5': 4,
+      'prize_6': 3, 'prize_7': 2,
+    };
+
+    if (nums && expectedDigits[prizeKey]) {
+      const d = expectedDigits[prizeKey];
+      let parts = nums.split(',');
+      let fixed = [];
+      for (let part of parts) {
+        if (part.length > d && part.length % d === 0) {
+          for (let i = 0; i < part.length; i += d) {
+            fixed.push(part.substring(i, i + d));
+          }
+        } else {
+          fixed.push(part);
+        }
+      }
+      nums = fixed.join(',');
+    }
+
+    if (nums) prizes[prizeKey] = nums;
+  });
 
   if (!prizes.prize_db) return null;
   return { province: 'Hà Nội', region: 'mb', draw_date: dateStr, ...prizes };
@@ -209,72 +240,97 @@ function parseHtmlMb(html, dateStr) {
 
 // ─── Parse HTML XSMN / XSMT ──────────────────────────────
 function parseHtmlMnMt(html, dateStr, region) {
-  // Tìm các block tỉnh: class chứa "xs-tinh", "xstinh", "box-kqxs"
-  const blockRegex = /<(?:div|section|article)[^>]*class="[^"]*(?:xs.?tinh|xstinh|box.?kqxs)[^"]*"[^>]*>([\s\S]*?)<\/(?:div|section|article)>/gi;
+  const $ = cheerio.load(html);
+  const tables = $('table.tbl-xsmn');
   const results = [];
-  let blockMatch;
 
-  while ((blockMatch = blockRegex.exec(html)) !== null) {
-    const block = blockMatch[1];
+  tables.each((_, table) => {
+    const rows = $(table).find('tr');
+    if (rows.length === 0) return;
 
-    // Tên tỉnh: trong h2, h3 hoặc thẻ class chứa "tinh-name"
-    const nameMatch = block.match(/<(?:h[23]|span|div)[^>]*class="[^"]*(?:tinh.?name|name.?tinh)[^"]*"[^>]*>([\s\S]*?)<\/(?:h[23]|span|div)>/i)
-      || block.match(/<h[23][^>]*>([\s\S]*?)<\/h[23]>/i);
-    const province = nameMatch ? nameMatch[1].replace(/<[^>]+>/g, '').trim() : '';
-    if (!province) continue;
+    const firstRow = $(rows[0]);
+    let headerCells = firstRow.find('td');
+    if (headerCells.length === 0) headerCells = firstRow.find('th');
 
-    const prizes = {};
+    const provinces = [];
+    for (let ci = 1; ci < headerCells.length; ci++) {
+      provinces.push($(headerCells[ci]).text().trim());
+    }
+    if (provinces.length === 0) return;
 
-    // Parse bảng trong block
-    const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    let rowMatch;
-    while ((rowMatch = rowRegex.exec(block)) !== null) {
-      const tr = rowMatch[1];
-      const cells = tr.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || [];
+    const prizesPerProvince = Array(provinces.length).fill().map(() => ({}));
+
+    const titleMap = {
+      'đb': 'prize_db', 'giải đb': 'prize_db',
+      'g.1': 'prize_1', 'giải nhất': 'prize_1',
+      'g.2': 'prize_2', 'giải nhì': 'prize_2',
+      'g.3': 'prize_3', 'giải ba': 'prize_3',
+      'g.4': 'prize_4', 'giải tư': 'prize_4',
+      'g.5': 'prize_5', 'giải năm': 'prize_5',
+      'g.6': 'prize_6', 'giải sáu': 'prize_6',
+      'g.7': 'prize_7', 'giải bảy': 'prize_7',
+      'g.8': 'prize_8', 'giải tám': 'prize_8',
+    };
+
+    for (let ri = 1; ri < rows.length; ri++) {
+      const cells = $(rows[ri]).find('td');
       if (cells.length < 2) continue;
 
-      const cellTexts = cells.map(c =>
-        c.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
-      );
-      const label = cellTexts[0].toLowerCase();
-      const nums  = cellTexts.slice(1).join(',').replace(/[^0-9,]/g, '').replace(/,+/g, ',').replace(/^,|,$/g, '');
+      let label = ($(cells[0]).attr('title') || $(cells[0]).text()).trim().toLowerCase();
+      let prizeKey = null;
+      for (const [k, v] of Object.entries(titleMap)) {
+        if (label === k || label.includes(k)) { prizeKey = v; break; }
+      }
+      if (!prizeKey) continue;
 
-      const maps = [
-        { labels: ['đặc', 'đb'], col: 'prize_db' },
-        { labels: ['nhất'],       col: 'prize_1' },
-        { labels: ['nhì'],         col: 'prize_2' },
-        { labels: ['ba'],          col: 'prize_3' },
-        { labels: ['tư'],          col: 'prize_4' },
-        { labels: ['năm'],         col: 'prize_5' },
-        { labels: ['sáu'],         col: 'prize_6' },
-        { labels: ['bảy'],         col: 'prize_7' },
-        { labels: ['tám'],         col: 'prize_8' },
-      ];
+      for (let ci = 1; ci < cells.length; ci++) {
+        let pi = ci - 1;
+        if (pi >= provinces.length) break;
 
-      for (const { labels, col } of maps) {
-        if (labels.some(l => label.includes(l)) && nums) {
-          prizes[col] = nums;
-          break;
+        let cell = $(cells[ci]);
+        let innerHtml = '';
+        cell.contents().each((_, node) => {
+           if (node.type === 'text') {
+             let t = $(node).text().trim();
+             if (t) innerHtml += t + ' ';
+           } else if (node.name === 'br') {
+             innerHtml += ' ';
+           } else {
+             let t = $(node).text().trim();
+             if (t) innerHtml += t + ' ';
+           }
+        });
+
+        let nums = innerHtml.replace(/[^0-9 ]/g, ' ').trim();
+        let parts = nums.split(' ').filter(n => /^\\d{2,}$/.test(n.trim())).map(n => n.trim());
+        if (parts.length > 0) {
+          prizesPerProvince[pi][prizeKey] = parts.join(',');
         }
       }
     }
 
-    if (prizes.prize_db) {
-      results.push({ province, region, draw_date: dateStr, ...prizes });
-    }
-  }
+    provinces.forEach((province, pi) => {
+      const prizes = prizesPerProvince[pi];
+      if (prizes.prize_db && province) {
+        results.push({ province, region, draw_date: dateStr, ...prizes });
+      }
+    });
+  });
 
   return results;
 }
 
 // ─── Crawl theo ngày (HTML — lịch sử) ─────────────────────
 async function crawlByDate(region, dateStr, onLog) {
-  const [y, m, d] = dateStr.split('-');
+  const [y, mm, dd] = dateStr.split('-');
+  const d = parseInt(dd, 10);
+  const m = parseInt(mm, 10);
+  
   const slugs = { mb: 'xsmb', mn: 'xsmn', mt: 'xsmt' };
   const slug = slugs[region];
   if (!slug) return [];
 
-  const url = `https://xskt.com.vn/${slug}/ngay-${d}-${m}-${y}.html`;
+  const url = `https://ketquaxoso3.com/${slug}/ngay-${d}-${m}-${y}`;
   const html = await httpGet(url);
   if (!html || html.length < 500) {
     onLog(`⚠️ [${region.toUpperCase()}] Không lấy được HTML ngày ${dateStr}`);
