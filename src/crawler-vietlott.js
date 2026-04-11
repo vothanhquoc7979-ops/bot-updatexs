@@ -1,19 +1,6 @@
-/**
- * crawler-vietlott.js — Crawl Vietlott từ ketquaxoso3.com
- *
- * Mỗi hàm fetch trả về object:
- * {
- *   game_type, draw_date, draw_number,
- *   numbers, power_ball,
- *   jackpot, jackpot2,
- *   prizes: { name, count, amount }[]   // full breakdown giải thưởng
- * }
- *
- * Hoặc null nếu không có kết quả (ngày không quay, lỗi network...).
- */
-
 'use strict';
 const cheerio = require('cheerio');
+const crypto = require('crypto');
 
 // ─── HTTP helper ──────────────────────────────────────────
 async function httpGet(url, timeout = 15000) {
@@ -38,231 +25,168 @@ async function httpGet(url, timeout = 15000) {
   }
 }
 
-// ─── Lấy KQXS Vietlott chung từ ketquaxoso3.com ────────────────────────────
-async function fetchVietlottGame(gameType, dateStr, urlSlug, maxN, expectedBalls) {
-  const [y, m, d] = dateStr.split('-');
-  const url = `https://ketquaxoso3.com/${urlSlug}/ngay-${d}-${m}-${y}`;
-
+// ─── Ketqua.plus SSR parser cho xổ số tĩnh (Mega, Power, Max) ─────
+async function fetchKetquaPlus(gameType, dateStr, urlSlug) {
+  const url = `https://ketqua.plus/${urlSlug}`;
+  
   const html = await httpGet(url);
-  if (!html || html.length < 500) return null;
+  if (!html) return null;
 
-  const $ = cheerio.load(html);
-  const allText = $('body').text().replace(/\s+/g, ' ');
+  const match = html.match(/window\.__SSR_DATA__\s*=\s*(.*?)(?:;?<\/script>)/s);
+  if (!match) return null;
 
-  // 1) Số kỳ quay: "#NNNNN"
-  let drawNumber = null;
-  $('a').each((_, el) => {
-    let txt = $(el).text().trim();
-    if (/^#(\d{3,6})/.test(txt)) {
-      drawNumber = '#' + txt.match(/^#(\d+)/)[1].padStart(5, '0');
-    }
-  });
-  if (!drawNumber) {
-    let match = allText.match(/Kỳ\s*(?:MT|mở\s*thưởng)[^#]*#(\d{3,6})/i);
-    if (match) drawNumber = '#' + match[1].padStart(5, '0');
+  let json;
+  try {
+    json = JSON.parse(match[1]);
+  } catch (e) { return null; }
+
+  const draws = json?.vietlott_list?.draws || [];
+  const draw = draws.find(dObj => (dObj.drawDate || '').startsWith(dateStr));
+  if (!draw) return null;
+
+  let numbers = '';
+  const nums = draw.numbers || {};
+  const pad = n => String(n).padStart(2, '0');
+
+  if (gameType === 'mega645' || gameType === 'power655') {
+    if (Array.isArray(nums)) numbers = nums.map(pad).join(',');
+  } else if (gameType === 'max3d') {
+    const sp = (nums.special || []).join(',');
+    const f1 = (nums.first || []).join(',');
+    const f2 = (nums.second || []).join(',');
+    const f3 = (nums.third || []).join(',');
+    numbers = [sp, f1, f2, f3].join('|');
+  } else if (gameType === 'max3dpro') {
+    const sp = (nums.special || []).join(',');
+    const sps = (nums.special_sub || []).join(',');
+    const f1 = (nums.first || []).join(',');
+    const f2 = (nums.second || []).join(',');
+    const f3 = (nums.third || []).join(',');
+    numbers = [sp, sps, f1, f2, f3].join('|');
+  } else if (gameType === 'max4d') {
+    const g1 = nums.g1 || '';
+    const g2 = (nums.g2 || []).join(',');
+    const g3 = (nums.g3 || []).join(',');
+    numbers = [g1, g2, g3].join('|');
   }
 
-  // 2) Jackpot
-  let jackpot = null;
-  let jackpot2 = null;
+  let drawNumber = draw.drawCode || draw.drawNum || '';
+  if (drawNumber) drawNumber = '#' + String(drawNumber).padStart(5, '0');
 
-  // Lấy Jackpot qua thẻ bảng thống kê trúng giải (chuẩn xác nhất)
-  const tableTrungGiai = $('table.trunggiai');
-  if (tableTrungGiai.length > 0) {
-    tableTrungGiai.find('tr').each((_, tr) => {
-      const tds = $(tr).find('td');
-      if (tds.length >= 4) {
-        let label = $(tds[0]).text().toLowerCase().trim();
-        let amount = $(tds[3]).text().replace(/[^0-9]/g, '');
-        
-        if (label === 'j.pot' || label === 'jackpot' || label === 'j.pot 1' || label === 'jackpot 1') {
-          if (amount.length > 5) jackpot = amount;
-        } else if (label === 'j.pot 2' || label === 'jackpot 2') {
-          if (amount.length > 5) jackpot2 = amount;
-        }
-      }
-    });
-  }
-
-  // Fallback lấy bằng Regex
-  if (!jackpot) {
-    let jpMatch = allText.match(/Jackpot[^0-9]*([\d.,]{5,})\s*(?:vn[đd]|đ|\bvnd\b)/i);
-    if (!jpMatch) jpMatch = allText.match(/([\d.,]{7,})\s*(?:vn[đd]|đ|\bvnd\b)/i);
-    if (jpMatch) jackpot = jpMatch[1].replace(/[^0-9]/g, '');
-  }
-
-  // 3) Numbers
-  let candidates = [];
-  let power_ball = null;
-
-  // Strategy A: Tìm row "Kết quả"
-  $('tr').each((_, tr) => {
-    if (candidates.length >= expectedBalls) return;
-    const tds = $(tr).find('td');
-    let firstText = $(tds[0]).text().toLowerCase();
-    if (firstText.includes('kết quả') || firstText.includes('ket qua')) {
-      let numText = '';
-      for (let i = 1; i < tds.length; i++) {
-        numText += ' ' + $(tds[i]).text();
-      }
-      let matches = numText.match(/\b(\d{2})\b/g) || [];
-      let valid = matches.map(n => n).filter(n => parseInt(n) >= 1 && parseInt(n) <= maxN);
-      if (valid.length >= expectedBalls) {
-        candidates = valid.slice(0, expectedBalls + 1);
-      }
-    }
-  });
-
-  // Strategy B: Power 6/55 JP2
-  if (gameType === 'power655') {
-    $('tr').each((_, tr) => {
-      const tds = $(tr).find('td');
-      let firstText = $(tds[0]).text().toLowerCase();
-      if (firstText.includes('jp2')) {
-        let numText = '';
-        for (let i = 1; i < tds.length; i++) {
-          numText += ' ' + $(tds[i]).text();
-        }
-        let matches = numText.match(/\b(\d{1,2})\b/g) || [];
-        for (let n of matches) {
-          let npad = n.padStart(2, '0');
-          if (parseInt(n) >= 1 && parseInt(n) <= 55 && !candidates.includes(npad)) {
-            power_ball = npad;
-            break;
-          }
-        }
-      }
-    });
-
-    let j2Match = allText.match(/Jp[oo]t2[^\d]*([\d.,]{5,})/i);
-    if (j2Match) jackpot2 = j2Match[1].replace(/[^0-9]/g, '');
-  }
-
-  if (candidates.length < expectedBalls) {
-    return null;
-  }
-
-  let numbers = candidates.slice(0, expectedBalls).join(',');
+  let jackpot1 = typeof draw.jackpot1 !== 'undefined' && draw.jackpot1 !== null ? String(draw.jackpot1).replace(/\D/g, '') : null;
+  let jackpot2 = typeof draw.jackpot2 !== 'undefined' && draw.jackpot2 !== null ? String(draw.jackpot2).replace(/\D/g, '') : null;
 
   return {
     game_type: gameType,
     draw_date: dateStr,
     draw_number: drawNumber,
-    numbers,
-    power_ball,
-    jackpot,
-    jackpot2,
-    prizes: null,
+    numbers: numbers.replace(/\|+$/, '').replace(/(^\|+|\|+$)/g, ''), // clean trailing/leading pipes
+    power_ball: draw.specialNum ? pad(draw.specialNum) : null,
+    jackpot: jackpot1,
+    jackpot2: jackpot2,
+    prizes: null
   };
 }
 
-async function fetchMega(dateStr) {
-  return await fetchVietlottGame('mega645', dateStr, 'xsmega645', 45, 6);
-}
+async function fetchMega(dateStr)     { return await fetchKetquaPlus('mega645', dateStr, 'xo-so-mega-645'); }
+async function fetchPower(dateStr)    { return await fetchKetquaPlus('power655', dateStr, 'xo-so-power-655'); }
+async function fetchMax3D(dateStr)    { return await fetchKetquaPlus('max3d', dateStr, 'xo-so-max-3d'); }
+async function fetchMax3DPro(dateStr) { return await fetchKetquaPlus('max3dpro', dateStr, 'xo-so-max-3d-pro'); }
+async function fetchMax4D(dateStr)    { return await fetchKetquaPlus('max4d', dateStr, 'xo-so-max-4d'); }
 
-async function fetchPower(dateStr) {
-  return await fetchVietlottGame('power655', dateStr, 'xspower655', 55, 6);
-}
-
-// ─── Parse Max 3D / Max 3D Pro ────────────────────────────────────
-async function fetchVietlottMax(gameType, dateStr, urlSlug) {
-  const [y, m, d] = dateStr.split('-');
-  const url = `https://ketquaxoso3.com/${urlSlug}/ngay-${d}-${m}-${y}`;
-
-  const html = await httpGet(url);
-  if (!html || html.length < 500) return null;
-
-  const $ = cheerio.load(html);
-  const allText = $('body').text().replace(/\s+/g, ' ');
-
-  let drawNumber = null;
-  $('a').each((_, el) => {
-    let txt = $(el).text().trim();
-    if (/^#(\d{3,6})/.test(txt)) {
-      drawNumber = '#' + txt.match(/^#(\d+)/)[1].padStart(5, '0');
-    }
-  });
-  if (!drawNumber) {
-    let match = allText.match(/Kỳ\s*(?:MT|mở\s*thưởng)[^#]*#(\d{3,6})/i);
-    if (match) drawNumber = '#' + match[1].padStart(5, '0');
-  }
-
-  // Khác với Mega/Power, ở đây ta cần lấy hết table td và scan text theo pattern (3 chữ số)
-  let threeDigits = [];
-  $('td').each((_, td) => {
-    let txt = $(td).text().trim();
-    if (/^(\d{3})$/.test(txt)) {
-      let n = parseInt(txt);
-      if (n >= 0 && n <= 999 && !(n >= 2020 && n <= 2030)) {
-        threeDigits.push(txt.padStart(3, '0'));
-      }
-    }
-  });
-
-  if (threeDigits.length < 2) {
-    let m = allText.match(/(?<![0-9\/\-])(\d{3})(?![0-9])/g) || [];
-    for (let txt of m) {
-      let n = parseInt(txt);
-      if (n >= 0 && n <= 999 && !(n >= 2020 && n <= 2030)) {
-        threeDigits.push(txt.padStart(3, '0'));
-      }
-    }
-    threeDigits = [...new Set(threeDigits)].slice(0, 40);
-  }
-
-  if (threeDigits.length < 2) return null;
-
-  let maxPairs = 10;
-  let nums = threeDigits.slice(0, maxPairs * 2);
-  let pairs = [];
-  for (let i = 0; i + 1 < nums.length; i += 2) {
-    pairs.push(nums[i] + ',' + nums[i + 1]);
-  }
-
-  if (pairs.length === 0) return null;
-
-  return {
-    game_type: gameType,
-    draw_date: dateStr,
-    draw_number: drawNumber,
-    numbers: pairs.join('|'),
-    power_ball: null,
-    jackpot: null,
-    jackpot2: null,
-    prizes: null,
-  };
-}
-
-async function fetchMax3D(dateStr) {
-  return await fetchVietlottMax('max3d', dateStr, 'xsmax3d');
-}
-
-async function fetchMax3DPro(dateStr) {
-  return await fetchVietlottMax('max3dpro', dateStr, 'xsmax3dpro');
-}
-
-// ─── Parse Keno ──────────────────────────────────────────
-/**
- * Nguồn: xosothantai.mobi/xs-keno.html
- * Keno quay nhiều kỳ mỗi ngày (mỗi 5 phút 1 kỳ)
- * Lấy tất cả kỳ của ngày dateStr (YYYY-MM-DD)
- * Lưu: mỗi kỳ 1 dòng, mã kỳ dạng HHMM
- */
+// ─── Ketqua.plus Keno API ──────────────────────────────
 async function fetchKeno(dateStr) {
+  const ts = Date.now().toString();
+  const path = '/api/public/vietlott/keno?page=1&limit=100';
+  const method = 'GET';
+  // Ketqua.plus signature generation reverse-engineered from their React app SSR module
+  const stringToSign = `${ts}:${method}:${path}`; 
+  const sig = crypto.createHmac('sha256', 'xs365-api-sign-key-2026').update(stringToSign).digest('hex');
+
+  const controller = new AbortController();
+  // using api.xs365.vn because the ketqua.plus falls back to Nextjs HTML.
+  const url = 'https://api.xs365.vn' + path;
+  const timer = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'X-Ts': ts,
+        'X-Sig': sig,
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0'
+      }
+    });
+    clearTimeout(timer);
+    
+    if (!res.ok) {
+      // Fallback API if xs365.vn block our endpoint
+      const url2 = 'https://api.ketquaviet.net' + path;
+      const controller2 = new AbortController();
+      const timer2 = setTimeout(() => controller2.abort(), 15000);
+      try {
+          const res2 = await fetch(url2, {
+              signal: controller2.signal,
+              headers: { 'X-Ts': ts, 'X-Sig': sig, 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }
+          });
+          clearTimeout(timer2);
+          if (!res2.ok) return null;
+          const json2 = await res2.json();
+          // parse logic down
+          return parseKenoJsonArray(json2, dateStr);
+      } catch(e2) {
+          clearTimeout(timer2);
+          return await fetchKenoXosothantai(dateStr); // Last resort fallback to keep Keno alive
+      }
+    }
+    
+    const json = await res.json();
+    return parseKenoJsonArray(json, dateStr);
+
+  } catch (e) {
+    clearTimeout(timer);
+    // Connection refuse fallback to xosothantai
+    return await fetchKenoXosothantai(dateStr);
+  }
+}
+
+function parseKenoJsonArray(json, dateStr) {
+  const draws = json.data || json.draws || json.vietlott_list?.draws || [];
+  const matched = draws.filter(d => (d.drawDate || '').startsWith(dateStr));
+  if (matched.length === 0) return null;
+
+  return matched.map(draw => {
+    let numbers = '';
+    const nums = draw.numbers || [];
+    if (Array.isArray(nums)) numbers = nums.map(n => String(n).padStart(2, '0')).join(',');
+
+    let drawCode = draw.drawCode || draw.drawNum || '';
+    if (drawCode) drawCode = '#' + String(drawCode).padStart(5, '0');
+
+    return {
+      game_type: 'keno',
+      draw_date: dateStr,
+      draw_number: drawCode,
+      numbers,
+      power_ball: null,
+      jackpot: null,
+      jackpot2: null,
+      prizes: null
+    };
+  });
+}
+
+// Xosothantai fallback
+async function fetchKenoXosothantai(dateStr) {
   const url = 'https://xosothantai.mobi/xs-keno.html';
   const html = await httpGet(url, 20000);
   if (!html) return null;
 
-  // Parse ngày
   const [y, m, d] = dateStr.split('-');
   const targetDate = `${d}/${m}/${y}`;
-
-  // Tìm tất cả kỳ trong ngày
-  // Pattern: thẻ chứa kỳ quay với số 20 số
-  // Mỗi kỳ: 20 số (1-80)
   const results = [];
 
-  // Lấy tất cả các bộ số (20 số/kỳ) trong HTML
   const kenoSetRegex = /(?:\bprize\b|\bkeno\b|\bket\s*qua\b)[^<]*((?:\s*\d{1,2}){10,20})/gi;
   const sets = [];
   let m2;
@@ -271,13 +195,7 @@ async function fetchKeno(dateStr) {
     if (parts.length >= 10) sets.push(parts.slice(0, 20).join(','));
   }
 
-  // Xóa fallback do fallback tự động bắt số linh tinh trên web vào ngày ko có giải 
-  // (tránh tạo hàng trăm giải giả làm nghẽn Server / ModSecurity)
-
-  // Mỗi set = 1 kỳ Keno
-  const now = new Date();
   let counter = 0;
-
   for (const numbers of sets) {
     counter++;
     const code = String(counter).padStart(4, '0');
@@ -293,7 +211,7 @@ async function fetchKeno(dateStr) {
     });
   }
 
-  return results;
+  return results.length > 0 ? results : null;
 }
 
 // ─── Điều phối theo game type ──────────────────────────────
@@ -303,7 +221,8 @@ async function crawlGame(gameType, dateStr) {
     case 'power':    return [await fetchPower(dateStr)].filter(Boolean);
     case 'max3d':    return [await fetchMax3D(dateStr)].filter(Boolean);
     case 'max3dpro': return [await fetchMax3DPro(dateStr)].filter(Boolean);
-    case 'keno':     return await fetchKeno(dateStr);
+    case 'max4d':    return [await fetchMax4D(dateStr)].filter(Boolean);
+    case 'keno':     return await fetchKeno(dateStr) || [];
     default:         return [];
   }
 }
@@ -324,18 +243,6 @@ function getDateRange(from, to) {
 }
 
 // ─── Main: crawl tất cả game trong khoảng ngày ─────────────
-/**
- * @param {Object} opts
- * @param {string[]} opts.games    — ['mega','power','max3d','max3dpro','keno']
- * @param {string}   opts.from     — 'YYYY-MM-DD'
- * @param {string}   opts.to       — 'YYYY-MM-DD'
- * @param {Object}   opts.db       — mysql2 pool (dùng khi KHÔNG có phpProxy)
- * @param {string}   opts.phpProxyUrl     — URL endpoint crawl-save.php
- * @param {string}   opts.phpPushSecret   — secret để xác thực với PHP
- * @param {Function} opts.onLog    — (msg) => void
- * @param {boolean} opts.force     — xóa rồi cào lại
- * @returns {Promise<{saved: number, errors: number, logs: string[]}>}
- */
 async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, force = false }) {
   const dates = getDateRange(from, to);
   const logs = [];
@@ -347,6 +254,7 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
     power:    'power655',
     max3d:    'max3d',
     max3dpro: 'max3dpro',
+    max4d:    'max4d',
     keno:     'keno',
   };
 
@@ -357,6 +265,7 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
     power:    [2, 4, 6],     // T3, T5, T7
     max3d:    [1, 3, 5],     // T2, T4, T6
     max3dpro: [2, 4, 6],     // T3, T5, T7
+    max4d:    [2, 4, 6],     // T3, T5, T7 
     keno:     [0, 1, 2, 3, 4, 5, 6] // Mọi ngày
   };
 
@@ -366,21 +275,24 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
     const thuStr = dayOfWeek === 0 ? 'CN' : 'T' + (dayOfWeek + 1);
 
     for (const game of games) {
+      if (game === 'lotto13h' || game === 'lotto21h') continue;
+
       try {
         if (SCHEDULE[game] && !SCHEDULE[game].includes(dayOfWeek)) {
           onLog(`[${game.toUpperCase()}] ⏭  Bỏ qua ${dateStr} (${thuStr} không quay)`);
           continue;
         }
 
-        onLog(`[${game.toUpperCase()}] 🔍 Đang crawl ngày ${dateStr}...`);
+        onLog(`[${game.toUpperCase()}] 🔍 Đang crawl ngày ${dateStr} từ Ketqua.plus...`);
         const records = await crawlGame(game, dateStr);
 
-        if (records.length === 0) {
-          onLog(`[${game.toUpperCase()}] ⏭  Không có kết quả ngày ${dateStr} (ngày nghỉ)`);
+        if (!records || records.length === 0) {
+          onLog(`[${game.toUpperCase()}] ⏭   Không có kết quả ngày ${dateStr} (chưa xổ hoặc ngày nghỉ)`);
           continue;
         }
 
         for (const r of records) {
+          if (!r) continue;
           const gameType = GAME_MAP[game] || game;
 
           if (useProxy) {
@@ -392,7 +304,7 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
                 draw_date:   r.draw_date,
                 draw_number: r.draw_number || '',
                 numbers:     r.numbers,
-                power_ball: r.power_ball || '',
+                power_ball:  r.power_ball || '',
                 jackpot:     r.jackpot    || '',
                 jackpot2:    r.jackpot2   || '',
                 prizes:      r.prizes     || [],
@@ -442,9 +354,9 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
               [gameType, r.draw_date, r.draw_number, r.numbers, r.power_ball, r.jackpot, r.jackpot2]
             );
 
-            if (result.affectedRows > 0) {
+            if (result && result.affectedRows > 0) {
               saved++;
-              onLog(`[${game.toUpperCase()}] ✅ ${r.draw_date} | ${r.draw_number || '?'} | ${r.numbers.slice(0, 20)}... | JP: ${r.jackpot || '-'}`);
+              onLog(`[${game.toUpperCase()}] ✅ ${r.draw_date} | ${r.draw_number || '?'} | ${String(r.numbers).slice(0, 20)}... | JP: ${r.jackpot || '-'}`);
             } else {
               onLog(`[${game.toUpperCase()}] ⏭  ${r.draw_date} đã có, bỏ qua`);
             }
@@ -460,4 +372,4 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
   return { saved, errors, logs };
 }
 
-module.exports = { crawl, crawlGame, fetchMega, fetchPower, fetchMax3D, fetchMax3DPro, fetchKeno };
+module.exports = { crawl, crawlGame, fetchMega, fetchPower, fetchMax3D, fetchMax3DPro, fetchMax4D, fetchKeno };

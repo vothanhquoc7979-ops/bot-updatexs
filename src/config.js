@@ -45,7 +45,7 @@ module.exports = {
   // Map code tỉnh từ API sang tên đầy đủ
   PROVINCE_MAP: {
     // Miền Nam
-    VL: 'Vĩnh Long',   BD: 'Bình Dư��ng',  TV: 'Trà Vinh',
+    VL: 'Vĩnh Long',   BD: 'Bình Dương',  TV: 'Trà Vinh',
     CT: 'Cần Thơ',     LA: 'Long An',     HCM: 'TP. HCM',
     DN: 'Đồng Nai',    ST: 'Sóc Trăng',   CM: 'Cà Mau',
     TG: 'Tiền Giang',  AG: 'An Giang',    BL: 'Bạc Liêu',
