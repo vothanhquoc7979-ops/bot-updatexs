@@ -254,8 +254,6 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
     power:    'power655',
     max3d:    'max3d',
     max3dpro: 'max3dpro',
-    max4d:    'max4d',
-    keno:     'keno',
   };
 
   const useProxy = !!(phpProxyUrl && phpPushSecret);
@@ -265,8 +263,6 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
     power:    [2, 4, 6],     // T3, T5, T7
     max3d:    [1, 3, 5],     // T2, T4, T6
     max3dpro: [2, 4, 6],     // T3, T5, T7
-    max4d:    [2, 4, 6],     // T3, T5, T7 
-    keno:     [0, 1, 2, 3, 4, 5, 6] // Mọi ngày
   };
 
   for (const dateStr of dates) {
