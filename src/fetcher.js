@@ -61,6 +61,7 @@ function parseMB(raw) {
   // MB|timestamp|doneFlag|1:G1|2:G2a-G2b|3:...|4:...|5:...|6:...|MaDb:...|7:...|DB:dacbiet|
   const parts = raw.split('|');
   // parts[0] = 'MB', parts[1] = timestamp, parts[2] = doneFlag
+  const apiDateRaw = parts[1];
   const doneFlag = parts[2] === '1';
 
   const prizes = {};
@@ -89,6 +90,7 @@ function parseMB(raw) {
     province: 'Hà Nội',
     region:   'mb',
     done:     doneFlag,
+    apiDate:  apiDateRaw,
     prizes,
   }];
 }
@@ -99,6 +101,10 @@ function parseMNMT(raw, region) {
   // Tách phần header (tên tỉnh + timestamp) và từng section tỉnh
   const firstTilde = raw.indexOf('~');
   if (firstTilde < 0) return [];
+
+  const headerStr = raw.substring(0, firstTilde);
+  const headerParts = headerStr.split('|');
+  const apiDateRaw = headerParts[1];
 
   const sections = raw.substring(firstTilde + 1).split('~');
   const results = [];
@@ -142,6 +148,7 @@ function parseMNMT(raw, region) {
       province: provinceName,
       region,
       done,
+      apiDate: apiDateRaw,
       prizes,
     });
   }

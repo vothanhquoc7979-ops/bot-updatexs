@@ -58,12 +58,24 @@ async function pollOnce(region, onLog) {
       return;
     }
 
+    const drawDate = resolveDrawDate(region);
+    const apiDateRaw = results[0]?.apiDate;
+    if (apiDateRaw) {
+      const dp = apiDateRaw.split('-');
+      if (dp.length >= 3) {
+         const apiDateStr = `${dp[2]}-${dp[1]}-${dp[0]}`;
+         if (apiDateStr !== drawDate) {
+            // API kqxs.tube chưa reset ngày mới → bỏ qua
+            onLog(`[${region.toUpperCase()}] ⏳ Đang chờ kqxs.tube up ngày mới (hiện tại: ${apiDateStr}, cần: ${drawDate})`);
+            return;
+         }
+      }
+    }
+
     const old = state[region]?.lastData;
     if (hasNewData(old, results)) {
       state[region].lastData = results;
 
-      // Xác định ngày đúng (hôm nay hay hôm qua) theo giờ xổ
-      const drawDate = resolveDrawDate(region);
       const doneCount = results.filter(r => r.done).length;
       const total     = results.length;
       onLog(`[${region.toUpperCase()}] 📅 Draw date: ${drawDate} | Cập nhật mới! ${doneCount}/${total} tỉnh xong — push sang web...`);
