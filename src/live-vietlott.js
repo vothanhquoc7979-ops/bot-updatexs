@@ -176,6 +176,10 @@ async function pollLiveKetquaPlus(game, onLog) {
 function startLiveVietlottDaemon(onLog) {
     onLog("[LIVE] Daemon Ketqua.Plus Vietlott Live đã khởi chạy ngầm (Polled 3s/lần).");
     setInterval(() => {
+        // Kiểm tra xem nút gạt trên giao diện Bot Dashboard (thẻ Config) có đang bật Auto Schedule không
+        const autoScheduleEnabled = storage.load().auto_schedule;
+        if (autoScheduleEnabled === false) return; // Nếu admin gạt tắt thì cũng ngủ luôn
+
         Object.keys(LIVE_SCHEDULE).forEach(game => {
             if (!liveState[game]) {
                 liveState[game] = { timer: null, lastHash: null, isDoneForToday: false, resetDate: null };
@@ -191,7 +195,7 @@ function startLiveVietlottDaemon(onLog) {
 
             if (isLiveTime(game) && !liveState[game].isDoneForToday) {
                 if (!liveState[game].timer) {
-                    onLog(`[LIVE] 🔴 Bắt đầu cao tốc Polling cho ${game.toUpperCase()}...`);
+                    onLog(`[Scheduler] 🕒 Đã đến giờ xổ Vietlott ${game.toUpperCase()} → tự động kích hoạt bot Trực tiếp!`);
                     // Gọi lần đầu tiên
                     pollLiveKetquaPlus(game, onLog);
                     // Lặp định kỳ mỗi 3.5 giây
