@@ -241,6 +241,10 @@ async function main() {
     res.json({ ok: true, clients: forumSSE.getClientCount() });
   });
 
+  // Khởi chạy ngầm tính năng Ketqua.Plus Vietlott Live Polling
+  const liveVietlott = require('./live-vietlott');
+  liveVietlott.startLiveVietlottDaemon(logger.log);
+
   // Bật chế độ tự động check giờ xổ (nếu config auto_schedule đang bật)
   const scheduler = require('./scheduler');
   scheduler.startAutoSchedule(logger.log);
