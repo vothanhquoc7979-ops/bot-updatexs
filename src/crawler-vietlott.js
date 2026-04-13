@@ -31,6 +31,8 @@ function formatNumbers(gameType, nums) {
     const g2 = (nums.g2 || []).join(',');
     const g3 = (nums.g3 || []).join(',');
     numbers = [g1, g2, g3].join('|');
+  } else if (gameType.startsWith('lotto535')) {
+    if (Array.isArray(nums)) numbers = nums.map(pad).join(',');
   }
   return numbers.replace(/\|+$/, '').replace(/(^\|+|\|+$)/g, '');
 }
@@ -44,11 +46,21 @@ async function crawlGame(gameType, dateStr) {
     power:    'power655',
     max3d:    'max3d',
     max3dpro: 'max3dpro',
-    max4d:    'max4d'
+    max4d:    'max4d',
+    lotto13h: 'lotto535_13h',
+    lotto21h: 'lotto535_21h'
   };
   
   const vGameKey = GAME_MAP[gameType] || gameType;
-  const draw = json.vietlott[vGameKey];
+  
+  let draw;
+  if (vGameKey.startsWith('lotto535')) {
+    const lottoArray = json.vietlott['lotto535'] || [];
+    draw = lottoArray.filter(d => d.gameType === vGameKey);
+  } else {
+    draw = json.vietlott[vGameKey];
+  }
+  
   if (!draw) return []; // no draw or null
 
   // API could return array (e.g. lotto 535) or a single object.
@@ -109,7 +121,9 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
     power:    'power655',
     max3d:    'max3d',
     max3dpro: 'max3dpro',
-    max4d:    'max4d'
+    max4d:    'max4d',
+    lotto13h: 'lotto535_13h',
+    lotto21h: 'lotto535_21h'
   };
 
   const useProxy = !!(phpProxyUrl && phpPushSecret);
@@ -119,6 +133,8 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
     power:    [2, 4, 6],     // T3, T5, T7
     max3d:    [1, 3, 5],     // T2, T4, T6
     max3dpro: [2, 4, 6],     // T3, T5, T7
+    lotto13h: [0, 1, 2, 3, 4, 5, 6],
+    lotto21h: [0, 1, 2, 3, 4, 5, 6],
   };
 
   for (const dateStr of dates) {
@@ -127,8 +143,6 @@ async function crawl({ games, from, to, db, phpProxyUrl, phpPushSecret, onLog, f
     const thuStr = dayOfWeek === 0 ? 'CN' : 'T' + (dayOfWeek + 1);
 
     for (const game of games) {
-      if (game === 'lotto13h' || game === 'lotto21h') continue;
-
       try {
         if (SCHEDULE[game] && !SCHEDULE[game].includes(dayOfWeek)) {
           onLog(`[${game.toUpperCase()}] ⏭  Bỏ qua ${dateStr} (${thuStr} không quay)`);

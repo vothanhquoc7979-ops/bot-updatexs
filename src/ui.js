@@ -395,6 +395,8 @@ router.get('/', requireAuth, (req, res) => {
               <label class="game-check"><input type="checkbox" class="game-cb" value="power"> ⚡ Power 6/55</label>
               <label class="game-check"><input type="checkbox" class="game-cb" value="max3d"> 🎲 Max 3D</label>
               <label class="game-check"><input type="checkbox" class="game-cb" value="max3dpro"> 🎲 Max 3D Pro</label>
+              <label class="game-check"><input type="checkbox" class="game-cb" value="lotto13h"> 🎫 Lotto 5/35 13H</label>
+              <label class="game-check"><input type="checkbox" class="game-cb" value="lotto21h"> 🎫 Lotto 5/35 21H</label>
 
             </div>
 
