@@ -101,8 +101,8 @@ async function pollLiveKetquaPlus(game, onLog) {
         // Không có dữ liệu xổ, hoặc đã xổ xong kết thúc thì có thể bỏ qua nếu isDone = true
         if (!result.data) return; 
 
-        const d = result.data;
-        let drawNumber = d.drawCode || d.drawNum || '';
+        const d = result.data || {};
+        let drawNumber = result.drawCode || d.drawCode || d.drawNum || '';
         if (drawNumber && !String(drawNumber).startsWith('#')) drawNumber = '#' + String(drawNumber).padStart(5, '0');
 
         const padSpecial = n => (n === null || n === undefined || n === '') ? '?' : String(n).padStart(2, '0');
