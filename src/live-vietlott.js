@@ -24,8 +24,8 @@ const LIVE_SCHEDULE = {
     max3d:        { days: [1, 3, 5], start: "18:05", end: "18:35" },
     max3dpro:     { days: [2, 4, 6], start: "18:05", end: "18:35" },
     max4d:        { days: [2, 4, 6], start: "18:05", end: "18:35" },
-    lotto535_13h: { days: [0, 1, 2, 3, 4, 5, 6], start: "13:05", end: "13:35" },
-    lotto535_21h: { days: [0, 1, 2, 3, 4, 5, 6], start: "21:05", end: "21:35" },
+    lotto535_13h: { days: [0, 1, 2, 3, 4, 5, 6], start: "13:00", end: "13:35" },
+    lotto535_21h: { days: [0, 1, 2, 3, 4, 5, 6], start: "21:00", end: "21:35" },
 };
 
 function isLiveTime(game) {
@@ -79,7 +79,11 @@ function formatLiveNumbers(gameType, d) {
 const liveState = {};
 
 async function pollLiveKetquaPlus(game, onLog) {
-    const path = `/api/public/live/vietlott?product=${game}`;
+    let apiProduct = game;
+    if (game.startsWith('lotto535')) {
+        apiProduct = 'lotto535';
+    }
+    const path = `/api/public/live/vietlott?product=${apiProduct}`;
     const url = `https://ketqua.plus${path}`;
     const { sig, ts } = generateSignature('GET', path);
 
