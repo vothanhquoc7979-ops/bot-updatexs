@@ -47,32 +47,33 @@ function generateSignature(method, path) {
 
 function formatLiveNumbers(gameType, d) {
     const pad = n => (n === null || n === undefined || n === '') ? '?' : String(n).padStart(2, '0');
-    let nums = d.numbers;
-    if (!nums) return '';
+    let nums = d.numbers || {};
     let numbers = '';
 
     if (gameType === 'mega645' || gameType === 'power655' || gameType.startsWith('lotto535')) {
-        if (Array.isArray(nums)) numbers = nums.map(pad).join(',');
+        let arr = Array.isArray(nums) ? nums : [];
+        if (arr.length === 0) arr = new Array(6).fill('?');
+        numbers = arr.map(pad).join(',');
     } else if (gameType === 'max3d') {
-        const sp = (nums.special || []).map(pad).join(',');
-        const f1 = (nums.first || []).map(pad).join(',');
-        const f2 = (nums.second || []).map(pad).join(',');
-        const f3 = (nums.third || []).map(pad).join(',');
+        const sp = (nums.special && nums.special.length > 0 ? nums.special : new Array(2).fill('?')).map(pad).join(',');
+        const f1 = (nums.first && nums.first.length > 0 ? nums.first : new Array(4).fill('?')).map(pad).join(',');
+        const f2 = (nums.second && nums.second.length > 0 ? nums.second : new Array(6).fill('?')).map(pad).join(',');
+        const f3 = (nums.third && nums.third.length > 0 ? nums.third : new Array(8).fill('?')).map(pad).join(',');
         numbers = [sp, f1, f2, f3].join('|');
     } else if (gameType === 'max3dpro') {
-        const sp = (nums.special || []).map(pad).join(',');
-        const sps = (nums.special_sub || []).map(pad).join(',');
-        const f1 = (nums.first || []).map(pad).join(',');
-        const f2 = (nums.second || []).map(pad).join(',');
-        const f3 = (nums.third || []).map(pad).join(',');
+        const sp = (nums.special && nums.special.length > 0 ? nums.special : new Array(2).fill('?')).map(pad).join(',');
+        const sps = (nums.special_sub && nums.special_sub.length > 0 ? nums.special_sub : new Array(2).fill('?')).map(pad).join(',');
+        const f1 = (nums.first && nums.first.length > 0 ? nums.first : new Array(4).fill('?')).map(pad).join(',');
+        const f2 = (nums.second && nums.second.length > 0 ? nums.second : new Array(6).fill('?')).map(pad).join(',');
+        const f3 = (nums.third && nums.third.length > 0 ? nums.third : new Array(8).fill('?')).map(pad).join(',');
         numbers = [sp, sps, f1, f2, f3].join('|');
     } else if (gameType === 'max4d') {
-        const g1 = pad(nums.g1);
-        const g2 = (nums.g2 || []).map(pad).join(',');
-        const g3 = (nums.g3 || []).map(pad).join(',');
+        const g1 = pad(nums.g1 || '?');
+        const g2 = (nums.g2 && nums.g2.length > 0 ? nums.g2 : new Array(2).fill('?')).map(pad).join(',');
+        const g3 = (nums.g3 && nums.g3.length > 0 ? nums.g3 : new Array(3).fill('?')).map(pad).join(',');
         numbers = [g1, g2, g3].join('|');
     }
-    return numbers.replace(/\|+$/, '').replace(/(^\|+|\|+$)/g, '');
+    return numbers;
 }
 
 const liveState = {};
@@ -112,10 +113,17 @@ async function pollLiveKetquaPlus(game, onLog) {
         let jackpot2 = d.jackpot2 || '';
         if (jackpot2) jackpot2 = String(jackpot2).replace(/\D/g, '');
 
+        let drawDateStr = result.date || '';
+        if (drawDateStr && drawDateStr.includes('-') && drawDateStr.split('-')[0].length === 2) {
+            const parts = drawDateStr.split('-');
+            drawDateStr = `${parts[2]}-${parts[1]}-${parts[0]}`; // DD-MM-YYYY to YYYY-MM-DD
+        }
+        if (!drawDateStr) drawDateStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' });
+
         const formattedObj = {
             type: 'vietlott',
             game_type: game,
-            draw_date: result.date || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }),
+            draw_date: drawDateStr,
             draw_number: drawNumber,
             numbers: formatLiveNumbers(game, d),
             power_ball: powerBall,
