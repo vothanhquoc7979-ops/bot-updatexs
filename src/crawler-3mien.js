@@ -107,6 +107,8 @@ async function crawl({ regions, from, to, db, phpProxyUrl, phpPushSecret, onLog 
             draw_date: dateStr,
             results: records.map(r => ({
               province:  r.province,
+              flag2:     1,
+              done:      true,
               prize_db:  r.prize_db  || '',
               prize_1:   r.prize_1   || '',
               prize_2:   r.prize_2   || '',

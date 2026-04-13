@@ -22,8 +22,7 @@ router.use(session({
 
 // ── Auth middleware ───────────────────────────────────────
 function requireAuth(req, res, next) {
-  if (req.session?.authed) return next();
-  res.redirect('/login');
+  return next(); // Bỏ xác thực mật khẩu
 }
 
 // ── HTML shell ───────────────────────────────────────────
