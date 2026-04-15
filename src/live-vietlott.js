@@ -189,18 +189,16 @@ async function pollLiveKetquaPlus(game, onLog) {
         liveState[game].lastHash = currentHash;
         onLog(`[LIVE] ${game.toUpperCase()} Cập nhật banh mới (Dữ liệu đổi): ${formattedObj.numbers}`);
 
-        // Gửi qua PHP
-        const cfg = storage.load();
-        if (cfg.php_server_url && cfg.php_push_secret) {
-            const pushUrl = cfg.php_server_url + '/api/crawl-save.php';
-            await fetch(pushUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Bot-Secret': cfg.php_push_secret
-                },
-                body: JSON.stringify(formattedObj)
-            });
+        // Gửi đến TẤT CẢ sites song song
+        const { pushToOneSite } = require('./pusher');
+        const { getSites }      = require('./storage');
+        const sites = getSites();
+        if (sites.length > 0) {
+            await Promise.allSettled(
+                sites.map(({ domain, secret }) =>
+                    pushToOneSite(domain, secret, '/api/crawl-save.php', JSON.stringify(formattedObj))
+                )
+            );
         }
 
         if (result.isDone) {

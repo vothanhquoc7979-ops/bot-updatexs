@@ -1,5 +1,5 @@
 /**
- * pusher.js — Push data mới sang PHP hosting qua HTTP POST
+ * pusher.js — Push data mới sang tất cả PHP hosting qua HTTP POST song song
  *
  * Logic xác định draw_date đúng:
  *   MN/MT xổ lúc 16:00 → trước 16:00 = dữ liệu hôm qua, sau 16:00 = hôm nay
@@ -8,6 +8,7 @@
 'use strict';
 
 const { SCHEDULE } = require('./config');
+const { getSites } = require('./storage');
 
 // ─── Xác định draw_date đúng theo region + giờ hiện tại ────
 function resolveDrawDate(region) {
@@ -36,52 +37,52 @@ function resolveDrawDate(region) {
   return todayStr;
 }
 
-// ─── Push data sang PHP hosting ────────────────────────────
-async function pushToWeb(region, results) {
-  const phpProxyUrl = require('./storage').get('php_server_url') || process.env.PHP_PROXY_URL || '';
-  const PHP_SECRET  = require('./storage').get('php_push_secret') || process.env.BOT_PUSH_SECRET || '';
-
-  if (!phpProxyUrl) {
-    console.warn('[Pusher] PHP_PROXY_URL chưa cấu hình, bỏ qua push.');
-    return false;
-  }
-  if (!PHP_SECRET) {
-    console.warn('[Pusher] BOT_PUSH_SECRET chưa cấu hình, bỏ qua push.');
-    return false;
-  }
-
-  const drawDate = resolveDrawDate(region);
-  const url = phpProxyUrl.replace('/crawl-save.php', '/live-push.php');
-
+// ─── Push đến 1 site ───────────────────────────────────────
+async function pushToOneSite(domain, secret, endpoint, body) {
+  const url = domain.replace(/\/+$/, '') + endpoint;
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-
-    const body = JSON.stringify({ region, date: drawDate, results });
-
-    const res = await fetch(url, {
+    const ctrl = new AbortController();
+    const t    = setTimeout(() => ctrl.abort(), 8000);
+    const res  = await fetch(url, {
       method:  'POST',
-      signal:  controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Bot-Secret': PHP_SECRET,
-      },
+      signal:  ctrl.signal,
+      headers: { 'Content-Type': 'application/json', 'X-Bot-Secret': secret },
       body,
     });
-
-    clearTimeout(timer);
-
-    const bodyTxt = await res.text();
+    clearTimeout(t);
     if (!res.ok) {
-      console.error('[Pusher] HTTP ' + res.status + ' tu ' + url + ': ' + bodyTxt.substring(0, 300));
-      return false;
+      const txt = await res.text();
+      console.error('[Pusher] HTTP ' + res.status + ' ← ' + url + ': ' + txt.slice(0, 200));
     }
-
-    return true;
+    return res.ok;
   } catch (e) {
-    console.error('[Pusher] Loi ket noi den ' + url + ': ' + e.message);
+    console.error('[Pusher] Lỗi → ' + url + ': ' + e.message);
     return false;
   }
 }
 
-module.exports = { pushToWeb, resolveDrawDate };
+// ─── Push data đến TẤT CẢ sites song song ──────────────────
+async function pushToWeb(region, results) {
+  const sites = getSites();
+  if (!sites.length) {
+    console.warn('[Pusher] Chưa cấu hình site nào, bỏ qua push.');
+    return false;
+  }
+
+  const drawDate = resolveDrawDate(region);
+  const body     = JSON.stringify({ region, date: drawDate, results });
+
+  const settled = await Promise.allSettled(
+    sites.map(({ domain, secret }) => {
+      console.log('[Pusher] → ' + domain + '/api/live-push.php');
+      return pushToOneSite(domain, secret, '/api/live-push.php', body);
+    })
+  );
+
+  const ok  = settled.filter(r => r.status === 'fulfilled' && r.value).length;
+  const all = settled.length;
+  console.log('[Pusher] Xong: ' + ok + '/' + all + ' sites OK');
+  return ok > 0;
+}
+
+module.exports = { pushToWeb, resolveDrawDate, pushToOneSite };

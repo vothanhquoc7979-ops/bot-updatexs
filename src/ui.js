@@ -185,23 +185,81 @@ router.post('/api/control', requireAuth, express.json(), (req, res) => {
 // ── POST /api/save-config ─────────────────────────────────
 router.post('/api/save-config', requireAuth, express.json(), async (req, res) => {
   try {
-    const { telegram_bot_token, telegram_chat_id, php_host, php_push_secret, php_server_url, auto_schedule, gemini_api_key } = req.body;
+    const { telegram_bot_token, telegram_chat_id, auto_schedule, gemini_api_key } = req.body;
     storage.save({
       telegram_bot_token: (telegram_bot_token || '').trim(),
       telegram_chat_id:   (telegram_chat_id   || '').trim(),
-      php_host:           (php_host           || '').trim().replace(/\/$/, ''),
-      php_push_secret:    (php_push_secret    || '').trim(),
-      php_server_url:     (php_server_url     || '').trim().replace(/\/$/, ''),
       gemini_api_key:     (gemini_api_key     || '').trim(),
       auto_schedule:      auto_schedule === true || auto_schedule === 'true',
     });
     logger.log('✅ Đã lưu cấu hình mới. Restarting bot...');
-
-    // Restart bot với token mới
     const botManager = require('./bot-manager');
     await botManager.restart();
-
     res.json({ ok: true });
+  } catch (e) {
+    res.json({ ok: false, msg: e.message });
+  }
+});
+
+// ── POST /api/sites/add ────────────────────────────────────
+router.post('/api/sites/add', requireAuth, express.json(), (req, res) => {
+  try {
+    const { domain, secret } = req.body;
+    if (!domain || !secret) return res.json({ ok: false, msg: 'Thiếu domain hoặc secret' });
+    const cleanDomain = domain.trim().replace(/\/+$/, '');
+    if (!cleanDomain.startsWith('http')) return res.json({ ok: false, msg: 'Domain phải bắt đầu bằng https://' });
+
+    const cfg   = storage.load();
+    const sites = Array.isArray(cfg.sites) ? cfg.sites : [];
+    if (sites.find(s => s.domain === cleanDomain)) return res.json({ ok: false, msg: 'Domain đã tồn tại!' });
+    sites.push({ domain: cleanDomain, secret: secret.trim() });
+    storage.save({ sites });
+    logger.log(`✅ Đã thêm site: ${cleanDomain}`);
+    res.json({ ok: true, count: sites.length });
+  } catch (e) {
+    res.json({ ok: false, msg: e.message });
+  }
+});
+
+// ── POST /api/sites/remove ────────────────────────────────
+router.post('/api/sites/remove', requireAuth, express.json(), (req, res) => {
+  try {
+    const index = parseInt(req.body.index ?? -1, 10);
+    const cfg   = storage.load();
+    const sites = Array.isArray(cfg.sites) ? [...cfg.sites] : [];
+    if (index < 0 || index >= sites.length) return res.json({ ok: false, msg: 'Index không hợp lệ' });
+    const removed = sites.splice(index, 1);
+    storage.save({ sites });
+    logger.log(`🗑 Đã xóa site: ${removed[0]?.domain}`);
+    res.json({ ok: true, count: sites.length });
+  } catch (e) {
+    res.json({ ok: false, msg: e.message });
+  }
+});
+
+// ── GET /api/sites/test ───────────────────────────────────
+router.get('/api/sites/test', requireAuth, async (req, res) => {
+  try {
+    const index = parseInt(req.query.index ?? -1, 10);
+    const cfg   = storage.load();
+    const sites = Array.isArray(cfg.sites) ? cfg.sites : [];
+    const site  = sites[index];
+    if (!site) return res.json({ ok: false, msg: 'Site không tồn tại' });
+
+    const testUrl = site.domain + '/api/crawl-save.php';
+    const t0      = Date.now();
+    const ctrl    = new AbortController();
+    setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(testUrl, {
+      method:  'POST',
+      signal:  ctrl.signal,
+      headers: { 'Content-Type': 'application/json', 'X-Bot-Secret': site.secret },
+      body:    JSON.stringify({ _ping: true }),
+    });
+    const ms = Date.now() - t0;
+    // 403 Forbidden = secret sai; 200/400 = server OK
+    if (r.status === 403) return res.json({ ok: false, domain: site.domain, msg: 'Secret sai!', ms });
+    res.json({ ok: true, domain: site.domain, status: r.status, ms });
   } catch (e) {
     res.json({ ok: false, msg: e.message });
   }
@@ -308,9 +366,9 @@ router.get('/', requireAuth, (req, res) => {
         </div>
       </div>
 
-      <!-- Card: Cấu hình -->
+      <!-- Card: Cấu hình Bot (Telegram + Scheduler) -->
       <div class="card" style="margin-top:16px">
-        <div class="card-hd">⚙️ Cấu hình Bot</div>
+        <div class="card-hd">⚙️ Cấu hình Bot (Telegram + Scheduler)</div>
         <div class="card-body">
           <form id="cfg-form">
             <div class="grid">
@@ -336,34 +394,65 @@ router.get('/', requireAuth, (req, res) => {
               </div>
               <div>
                 <div class="form-group">
-                  <label>PHP Hosting URL</label>
-                  <input type="text" name="php_host" id="f-phphost"
-                    value="${cfg.php_host || ''}"
-                    placeholder="https://yoursite.com">
-                </div>
-                <div class="form-group">
-                  <label>PHP Push Secret Token</label>
-                  <input type="password" name="php_push_secret" id="f-phpsecret"
-                    value="${cfg.php_push_secret || ''}"
-                    placeholder="random_secret_32_chars">
-                </div>
-                <div class="form-group">
-                  <label>PHP Proxy URL (crawl-save.php)</label>
-                  <input type="text" name="php_server_url" id="f-phpserverurl"
-                    value="${cfg.php_server_url || ''}"
-                    placeholder="https://pateanlien.online/api/crawl-save.php">
+                  <label>Auto-schedule (tự chạy theo giờ xổ)</label>
+                  <select name="auto_schedule" id="f-auto">
+                    <option value="true" ${cfg.auto_schedule !== false ? 'selected' : ''}>✅ Bật — tự chạy theo lịch VN</option>
+                    <option value="false" ${cfg.auto_schedule === false ? 'selected' : ''}>❌ Tắt — chỉ chạy khi bấm tay</option>
+                  </select>
                 </div>
               </div>
             </div>
-            <div class="form-group">
-              <label>Auto-schedule (tự chạy theo giờ xổ)</label>
-              <select name="auto_schedule" id="f-auto">
-                <option value="true" ${cfg.auto_schedule !== false ? 'selected' : ''}>✅ Bật — tự chạy theo lịch VN</option>
-                <option value="false" ${cfg.auto_schedule === false ? 'selected' : ''}>❌ Tắt — chỉ chạy khi bấm tay</option>
-              </select>
-            </div>
             <button type="submit" class="btn btn-primary">💾 Lưu cấu hình & Restart bot</button>
           </form>
+        </div>
+      </div>
+
+      <!-- Card: Quản lý Websites -->
+      <div class="card" style="margin-top:16px">
+        <div class="card-hd">🌐 Websites nhận dữ liệu
+          <span class="pill pill-off" style="font-size:11px;margin-left:8px" id="sites-count">${(cfg.sites||[]).length} site</span>
+        </div>
+        <div class="card-body">
+          <p style="font-size:12px;color:var(--muted);margin-bottom:14px">
+            Bot sẽ push dữ liệu đồng thời đến tất cả sites bên dưới.<br>
+            URL được tự động tạo: <code style="color:#42a5f5">{domain}/api/crawl-save.php</code>
+          </p>
+
+          <!-- Danh sách sites -->
+          <div id="sites-list" style="margin-bottom:16px">
+            ${(cfg.sites||[]).length === 0
+              ? '<div style="color:var(--muted);font-size:13px">(Chưa có site nào)</div>'
+              : (cfg.sites||[]).map((s,i) => `
+                <div class="status-row" id="site-row-${i}">
+                  <div>
+                    <div style="font-weight:600;font-size:13px">${s.domain}</div>
+                    <div style="font-size:11px;color:var(--muted)">Secret: ${s.secret ? s.secret.slice(0,6)+'••••' : '(chưa có)'}</div>
+                  </div>
+                  <div class="actions">
+                    <button class="btn btn-blue btn-sm" onclick="testSite(${i})">&#128268; Test</button>
+                    <button class="btn btn-primary btn-sm" onclick="removeSite(${i})">✖ Xóa</button>
+                  </div>
+                </div>
+              `).join('')
+            }
+          </div>
+
+          <!-- Form thêm site -->
+          <div style="border-top:1px solid var(--border);padding-top:14px">
+            <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Thêm website mới:</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+              <div class="form-group" style="margin:0;flex:2;min-width:200px">
+                <label>Domain (không có dấu / cuối)</label>
+                <input type="text" id="new-site-domain" placeholder="https://yoursite.com">
+              </div>
+              <div class="form-group" style="margin:0;flex:1;min-width:140px">
+                <label>PHP Push Secret</label>
+                <input type="password" id="new-site-secret" placeholder="random_secret">
+              </div>
+              <button class="btn btn-green" onclick="addSite()">+ Thêm site</button>
+            </div>
+            <div id="site-add-msg" style="margin-top:8px;font-size:12px"></div>
+          </div>
         </div>
       </div>
 

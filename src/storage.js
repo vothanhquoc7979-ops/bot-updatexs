@@ -11,11 +11,13 @@ const CONFIG_FILE = path.join(__dirname, '..', 'config.json');
 
 const DEFAULTS = {
   telegram_bot_token: '',
-  telegram_chat_id: '',
-  php_host: '',
-  php_push_secret: '',
-  php_server_url: '',   // VD: https://pateanlien.online/api/crawl-save.php
-  auto_schedule: true,
+  telegram_chat_id:   '',
+  php_host:           '',   // legacy
+  php_push_secret:    '',   // legacy
+  php_server_url:     '',   // legacy
+  auto_schedule:      true,
+  gemini_api_key:     '',
+  sites: [],  // [{ domain: 'https://site.com', secret: 'xxx' }]
 };
 
 function load() {
@@ -45,4 +47,31 @@ function get(key) {
     || cfg[key] || '';
 }
 
-module.exports = { load, save, get };
+/**
+ * Trả về danh sách sites đã cấu hình.
+ * Ưu tiên mảng sites[] mới; fallback về php_host / php_server_url cũ.
+ * Mỗi phần tử: { domain: 'https://site.com', secret: '...' }
+ */
+function getSites() {
+  const cfg = load();
+
+  // Dùng mảng mới nếu có
+  if (Array.isArray(cfg.sites) && cfg.sites.length > 0) {
+    return cfg.sites
+      .filter(s => s.domain && s.secret)
+      .map(s => ({ domain: s.domain.replace(/\/+$/, ''), secret: s.secret }));
+  }
+
+  // Fallback legacy: php_host hoặc php_server_url
+  const legacyDomain =
+    cfg.php_host ||
+    (cfg.php_server_url ? cfg.php_server_url.replace(/\/api\/.*$/, '') : '');
+  const legacySecret = cfg.php_push_secret;
+
+  if (legacyDomain && legacySecret) {
+    return [{ domain: legacyDomain.replace(/\/+$/, ''), secret: legacySecret }];
+  }
+  return [];
+}
+
+module.exports = { load, save, get, getSites };
