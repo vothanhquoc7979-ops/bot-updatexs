@@ -76,6 +76,39 @@ function formatLiveNumbers(gameType, d) {
     return numbers;
 }
 
+/**
+ * Kiểm tra data có đầy đủ không trước khi coi là "xổ xong".
+ * Chỉ set isDoneForToday=true khi BOTH: API isDone=true và data này trả về true.
+ */
+function isDataComplete(game, formattedObj) {
+    const nums = formattedObj.numbers || '';
+    // Còn placeholder '?' trong số → chưa đủ
+    if (!nums || nums.includes('?')) return false;
+
+    if (game === 'power655') {
+        // Cần cả hai jackpot (jackpot1 và jackpot2)
+        return !!(formattedObj.jackpot && formattedObj.jackpot2);
+    }
+    if (game === 'mega645') {
+        // 6 bóng
+        return nums.split(',').filter(Boolean).length >= 6;
+    }
+    if (game === 'max3d') {
+        // Format: special|first|second|third (4 tiers)
+        const parts = nums.split('|');
+        return parts.length >= 4 && parts.every(p => p.trim() && !p.includes('?'));
+    }
+    if (game === 'max3dpro') {
+        // Format: special|special_sub|first|second|third (5 tiers)
+        const parts = nums.split('|');
+        return parts.length >= 5 && parts.every(p => p.trim() && !p.includes('?'));
+    }
+    if (game.startsWith('lotto535')) {
+        return nums.split(',').filter(Boolean).length >= 5;
+    }
+    return true;
+}
+
 const liveState = {};
 
 async function pollLiveKetquaPlus(game, onLog) {
@@ -138,16 +171,21 @@ async function pollLiveKetquaPlus(game, onLog) {
 
         const currentHash = JSON.stringify(formattedObj);
         if (liveState[game].lastHash === currentHash) {
-            // Không có thay đổi so với lần trước (bóng chưa rớt cái mới), tiết kiệm Request PHP MySQL
-            if (result.isDone) { // Nếu done thì dừng timer
-                 onLog(`[LIVE] ${game.toUpperCase()} đã xổ xong!`);
-                 clearInterval(liveState[game].timer);
-                 liveState[game].timer = null;
-                 liveState[game].isDoneForToday = true;
+            // Hash không đổi — kiểm tra có thực sự done không
+            if (result.isDone) {
+                if (isDataComplete(game, formattedObj)) {
+                    onLog(`[LIVE] ${game.toUpperCase()} đã xổ xong hoàn chỉnh! Tắt polling.`);
+                    clearInterval(liveState[game].timer);
+                    liveState[game].timer = null;
+                    liveState[game].isDoneForToday = true;
+                } else {
+                    // API báo isDone nhưng số/jackpot chưa đầy → tiếp tục poll
+                    onLog(`[LIVE] ${game.toUpperCase()} API isDone nhưng data chưa đầy đủ, tiếp tục poll...`);
+                }
             }
-            return; 
+            return;
         }
-        
+
         liveState[game].lastHash = currentHash;
         onLog(`[LIVE] ${game.toUpperCase()} Cập nhật banh mới (Dữ liệu đổi): ${formattedObj.numbers}`);
 
@@ -166,10 +204,14 @@ async function pollLiveKetquaPlus(game, onLog) {
         }
 
         if (result.isDone) {
-            onLog(`[LIVE] ${game.toUpperCase()} đã xổ xong! Tắt polling cho hôm nay.`);
-            clearInterval(liveState[game].timer);
-            liveState[game].timer = null;
-            liveState[game].isDoneForToday = true;
+            if (isDataComplete(game, formattedObj)) {
+                onLog(`[LIVE] ${game.toUpperCase()} đã xổ xong hoàn chỉnh! Tắt polling cho hôm nay.`);
+                clearInterval(liveState[game].timer);
+                liveState[game].timer = null;
+                liveState[game].isDoneForToday = true;
+            } else {
+                onLog(`[LIVE] ${game.toUpperCase()} API isDone nhưng jackpot/tiers chưa đủ, tiếp tục poll...`);
+            }
         }
 
     } catch (e) {

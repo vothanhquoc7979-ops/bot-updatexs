@@ -17,6 +17,14 @@ const vietlottState = {
   max3dpro: { doneForToday: false, timer: null },
 };
 
+// ─── Giờ an toàn tối đa: bot PHẢI tự dừng sau mốc này dù manual hay auto ──
+// 2h buffer sau giờ bắt đầu xổ (MN 16:00 → 18:00, MT 17:00 → 18:30, MB 18:00 → 20:00)
+const SAFE_STOP = {
+  mn: '18:00',
+  mt: '18:30',
+  mb: '20:00',
+};
+
 // ─── Lấy giờ phút hiện tại theo VN ────────────────────────
 function nowVN() {
   const now = new Date();
@@ -25,6 +33,13 @@ function nowVN() {
     hour: '2-digit', minute: '2-digit', hour12: false,
   });
   return hhmm; // "16:35"
+}
+
+// Đã qua giờ an toàn tối đa chưa?
+function isPastSafeStop(region) {
+  const safeTime = SAFE_STOP[region];
+  if (!safeTime) return false;
+  return nowVN() >= safeTime;
 }
 
 function isInSchedule(region) {
@@ -51,6 +66,13 @@ function hasNewData(oldResults, newResults) {
 
 // ─── Một lần poll ─────────────────────────────────────────
 async function pollOnce(region, onLog) {
+  // ── Kiểm tra giờ an toàn: đã qua mốc tối đa → dừng hẳn ─────────────────
+  if (isPastSafeStop(region)) {
+    onLog(`[${region.toUpperCase()}] ⏹ Đã qua giờ an toàn (${SAFE_STOP[region]}), tự dừng.`);
+    stop(region, onLog);
+    return;
+  }
+
   try {
     const results = await fetchRegion(region);
     if (!results) {
@@ -171,6 +193,14 @@ function startAutoSchedule(onLog) {
     
     // Nếu bị tắt trên dashboard thì bỏ qua
     if (autoScheduleEnabled === false) return;
+
+    // ── Force stop nếu đang chạy mà đã qua giờ an toàn ─────────────────────
+    for (const region of ['mn', 'mt', 'mb']) {
+      if (state[region]?.running && isPastSafeStop(region)) {
+        onLog(`[Scheduler] ⏹ Force stop ${REGION_NAMES[region]} — đã qua ${SAFE_STOP[region]}`);
+        stop(region, onLog);
+      }
+    }
 
     for (const region of ['mn', 'mt', 'mb']) {
       const inSchedule = isInSchedule(region);
