@@ -409,6 +409,8 @@ router.get('/', requireAuth, (req, res) => {
                 <label>Đến ngày</label>
                 <input type="date" id="crawl-to" class="form-control" value="${new Date().toISOString().slice(0,10)}">
               </div>
+              <button class="btn btn-blue" id="btn-check" onclick="checkMissing()">🔍 Kiểm tra thiếu ngày</button>
+              <button class="btn btn-green btn-sm" id="btn-check-inc" onclick="checkIncomplete()">🔧 Kiểm tra số thiếu</button>
               <button class="btn btn-primary" id="btn-crawl" onclick="runCrawl()">🚀 Bắt đầu crawl</button>
             </div>
           </div>
@@ -428,6 +430,14 @@ router.get('/', requireAuth, (req, res) => {
               </div>
             </div>
             <div id="crawl-summary" style="display:none;margin-top:10px;font-size:14px;font-weight:600"></div>
+          </div>
+        </div>
+
+        <!-- Kết quả kiểm tra dữ liệu thiếu -->
+        <div class="card" id="card-missing" style="margin-top:16px;display:none">
+          <div class="card-hd">🔍 Kết quả kiểm tra dữ liệu thiếu</div>
+          <div class="card-body" id="missing-results" style="font-size:13px;line-height:1.8">
+            <span style="color:var(--muted)">Ang kiểm tra...</span>
           </div>
         </div>
 
@@ -644,6 +654,225 @@ router.get('/', requireAuth, (req, res) => {
 
       btn.disabled = false;
       btn.textContent = '🚀 Bắt đầu crawl';
+    }
+
+    // ── Kiểm tra dữ liệu thiếu ───────────────────────────────
+    async function checkMissing() {
+      var mienChecked = Array.from(document.querySelectorAll('.mien-cb:checked')).map(function(cb) { return cb.value; });
+      var vtChecked   = Array.from(document.querySelectorAll('.game-cb:checked')).map(function(cb) { return cb.value; });
+      var from = document.getElementById('crawl-from').value;
+      var to   = document.getElementById('crawl-to').value;
+
+      if (!mienChecked.length && !vtChecked.length) { alert('Chọn ít nhất 1 loại xổ số!'); return; }
+      if (!from || !to) { alert('Chọn khoảng ngày!'); return; }
+
+      var btn = document.getElementById('btn-check');
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang kiểm tra...';
+
+      var card    = document.getElementById('card-missing');
+      var results = document.getElementById('missing-results');
+      card.style.display = '';
+      results.innerHTML  = '<span style="color:var(--muted)">Đang truy vấn database...</span>';
+
+      var html         = '';
+      var totalMissing = 0;
+      var missingInfo  = { games: [], regions: [], missingDates: {} };
+
+      // Check 3 Miền
+      if (mienChecked.length) {
+        try {
+          var p3  = new URLSearchParams({ type: '3mien', regions: mienChecked.join(','), from: from, to: to });
+          var r3  = await fetch('/api/check-missing?' + p3);
+          var d3  = await r3.json();
+          if (d3.ok) {
+            var miss3 = d3.missing || {};
+            if (!Object.keys(miss3).length) {
+              html += '<div style="color:#4caf50;margin-bottom:6px">✅ 3 Miền (' + mienChecked.join(', ').toUpperCase() + '): Đầy đủ!</div>';
+            } else {
+              for (var reg in miss3) {
+                var rdates = miss3[reg];
+                totalMissing += rdates.length;
+                missingInfo.regions.push(reg);
+                missingInfo.missingDates[reg] = rdates;
+                html += '<div style="margin-bottom:8px"><strong style="color:#ffa726">' + reg.toUpperCase() + '</strong>: thiếu <strong>' + rdates.length + '</strong> ngày';
+                html += ' <span style="font-size:11px;color:var(--muted)">' + rdates.slice(0, 5).join(', ') + (rdates.length > 5 ? ' ...' : '') + '</span></div>';
+              }
+            }
+          } else {
+            html += '<div style="color:#ef5350;margin-bottom:6px">❌ Lỗi 3 Miền: ' + escHtml(d3.error || d3.msg || '') + '</div>';
+          }
+        } catch(e) {
+          html += '<div style="color:#ef5350;margin-bottom:6px">❌ Không kết nối PHP (3 Miền): ' + escHtml(e.message) + '</div>';
+        }
+      }
+
+      // Check Vietlott
+      if (vtChecked.length) {
+        try {
+          var pVt = new URLSearchParams({ type: 'vietlott', games: vtChecked.join(','), from: from, to: to });
+          var rVt = await fetch('/api/check-missing?' + pVt);
+          var dVt = await rVt.json();
+          if (dVt.ok) {
+            var missVt = dVt.missing || {};
+            if (!Object.keys(missVt).length) {
+              html += '<div style="color:#4caf50;margin-bottom:6px">✅ Vietlott (' + vtChecked.join(', ').toUpperCase() + '): Đầy đủ!</div>';
+            } else {
+              for (var gm in missVt) {
+                var gdates = missVt[gm];
+                totalMissing += gdates.length;
+                missingInfo.games.push(gm);
+                missingInfo.missingDates[gm] = gdates;
+                html += '<div style="margin-bottom:8px"><strong style="color:#ffa726">' + gm.toUpperCase() + '</strong>: thiếu <strong>' + gdates.length + '</strong> ngày';
+                html += ' <span style="font-size:11px;color:var(--muted)">' + gdates.slice(0, 5).join(', ') + (gdates.length > 5 ? ' ...' : '') + '</span></div>';
+              }
+            }
+          } else {
+            html += '<div style="color:#ef5350;margin-bottom:6px">❌ Lỗi Vietlott: ' + escHtml(dVt.error || dVt.msg || '') + '</div>';
+          }
+        } catch(e) {
+          html += '<div style="color:#ef5350;margin-bottom:6px">❌ Không kết nối PHP (Vietlott): ' + escHtml(e.message) + '</div>';
+        }
+      }
+
+      if (totalMissing > 0) {
+        html = '<div style="color:#ef5350;font-size:14px;font-weight:700;margin-bottom:12px">⚠️ Tổng thiếu: ' + totalMissing + ' ngày</div>' + html;
+        html += '<button class="btn btn-primary" style="margin-top:12px" id="btn-crawl-missing">🚀 Crawl bù ' + totalMissing + ' ngày thiếu</button>';
+      } else if (html.indexOf('❌') === -1) {
+        html = '<div style="color:#4caf50;font-size:14px;font-weight:700">✅ Dữ liệu đầy đủ trong khoảng ngày đã chọn!</div>' + html;
+      }
+
+      results.innerHTML = html;
+
+      // Gắn sự kiện cho nút crawl bù
+      var btnMiss = document.getElementById('btn-crawl-missing');
+      if (btnMiss) {
+        (function(info) { btnMiss.onclick = function() { crawlMissing(info); }; })(missingInfo);
+      }
+
+      btn.disabled = false;
+      btn.textContent = '🔍 Kiểm tra thiếu';
+    }
+
+    // Crawl bù các ngày đã phát hiện thiếu
+    async function crawlMissing(info) {
+      var allDates = [];
+      for (var key in info.missingDates) {
+        allDates = allDates.concat(info.missingDates[key]);
+      }
+      allDates.sort();
+      if (!allDates.length) { appendCrawlLog('Không có ngày nào để crawl!', '#4caf50'); return; }
+
+      var from = allDates[0];
+      var to   = allDates[allDates.length - 1];
+
+      // Tick đúng checkbox
+      document.querySelectorAll('.mien-cb').forEach(function(cb) {
+        cb.checked = info.regions.indexOf(cb.value) >= 0;
+      });
+      document.querySelectorAll('.game-cb').forEach(function(cb) {
+        cb.checked = info.games.indexOf(cb.value) >= 0;
+      });
+      document.getElementById('crawl-from').value = from;
+      document.getElementById('crawl-to').value   = to;
+
+      appendCrawlLog('↩️ Crawl bù từ ' + from + ' → ' + to + ' (' + allDates.length + ' ngày thiếu)...', '#ffd700');
+      await runCrawl();
+    }
+
+    // ── Kiểm tra số thiếu trong record đã có (Max3D Pro thiếu tier, Power thiếu jackpot...) ──
+    async function checkIncomplete() {
+      var vtChecked = Array.from(document.querySelectorAll('.game-cb:checked')).map(function(cb) { return cb.value; });
+      var from = document.getElementById('crawl-from').value;
+      var to   = document.getElementById('crawl-to').value;
+
+      if (!vtChecked.length) { alert('Chọn ít nhất 1 game Vietlott để kiểm tra!'); return; }
+      if (!from || !to)      { alert('Chọn khoảng ngày!'); return; }
+
+      var btn = document.getElementById('btn-check-inc');
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang kiểm tra...';
+
+      var card    = document.getElementById('card-missing');
+      var results = document.getElementById('missing-results');
+      card.style.display = '';
+      results.innerHTML  = '<span style="color:var(--muted)">Đang scan record trong DB...</span>';
+
+      var html          = '';
+      var totalBroken   = 0;
+      var datesForCrawl = {};
+      var gamesForCrawl = [];
+
+      try {
+        var params = new URLSearchParams({ games: vtChecked.join(','), from: from, to: to });
+        var r      = await fetch('/api/check-incomplete?' + params);
+        var data   = await r.json();
+
+        if (!data.ok) {
+          results.innerHTML = '<div style="color:#ef5350">❌ Lỗi: ' + escHtml(data.msg || data.error || '') + '</div>';
+        } else {
+          var incomplete = data.incomplete || {};
+
+          if (!Object.keys(incomplete).length) {
+            results.innerHTML = '<div style="color:#4caf50;font-size:14px;font-weight:700">✅ Tất cả record đều đầy đủ! Không thiếu số nào.</div>';
+          } else {
+            for (var gm in incomplete) {
+              var rows = incomplete[gm];
+              totalBroken += rows.length;
+              gamesForCrawl.push(gm);
+              datesForCrawl[gm] = rows.map(function(r) { return r.date; });
+
+              html += '<div style="margin-bottom:14px">';
+              html += '<strong style="color:#ffa726;font-size:13px">' + gm.toUpperCase() + '</strong>: ' + rows.length + ' record thiếu số';
+              html += '<table style="width:100%;margin-top:6px;font-size:11px;border-collapse:collapse">';
+              html += '<thead><tr style="color:var(--muted)">';
+              html += '<th style="text-align:left;padding:3px 6px">Ngày</th>';
+              html += '<th style="text-align:left;padding:3px 6px">Kỳ</th>';
+              html += '<th style="text-align:left;padding:3px 6px">Vấn đề</th>';
+              html += '<th style="text-align:left;padding:3px 6px">Số hiện có</th>';
+              html += '</tr></thead><tbody>';
+              rows.forEach(function(row) {
+                html += '<tr style="border-top:1px solid #2a2d3d">';
+                html += '<td style="padding:3px 6px;color:#e8e8f0">' + row.date + '</td>';
+                html += '<td style="padding:3px 6px;color:var(--muted)">' + (row.draw_number || '—') + '</td>';
+                html += '<td style="padding:3px 6px;color:#ef5350">' + escHtml(row.issues) + '</td>';
+                html += '<td style="padding:3px 6px;color:var(--muted);font-family:monospace">' + escHtml(row.preview || '') + '</td>';
+                html += '</tr>';
+              });
+              html += '</tbody></table></div>';
+            }
+
+            html = '<div style="color:#ef5350;font-size:14px;font-weight:700;margin-bottom:14px">⚠️ ' + totalBroken + ' record thiếu số/jackpot</div>' + html;
+            html += '<button class="btn btn-primary" style="margin-top:8px" id="btn-fix-crawl">🚀 Crawl bù ' + totalBroken + ' record thiếu</button>';
+            results.innerHTML = html;
+
+            var btnFix = document.getElementById('btn-fix-crawl');
+            if (btnFix) {
+              (function(gms, dts) {
+                btnFix.onclick = function() {
+                  var allD = [];
+                  for (var k in dts) allD = allD.concat(dts[k]);
+                  allD.sort();
+                  var f = allD[0], t = allD[allD.length-1];
+                  document.querySelectorAll('.game-cb').forEach(function(cb) { cb.checked = gms.indexOf(cb.value) >= 0; });
+                  document.querySelectorAll('.mien-cb').forEach(function(cb) { cb.checked = false; });
+                  document.getElementById('crawl-from').value = f;
+                  document.getElementById('crawl-to').value   = t;
+                  appendCrawlLog('↩️ Crawl bù từ ' + f + ' → ' + t + ' (' + allD.length + ' ngày)...', '#ffd700');
+                  runCrawl();
+                };
+              })(gamesForCrawl, datesForCrawl);
+            }
+
+            return; // đã set innerHTML trong vòng lặp
+          }
+        }
+      } catch(e) {
+        results.innerHTML = '<div style="color:#ef5350">❌ Không kết nối: ' + escHtml(e.message) + '</div>';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🔧 Kiểm tra số thiếu';
+      }
     }
 
     // ── Start polling ────────────────────────────────────

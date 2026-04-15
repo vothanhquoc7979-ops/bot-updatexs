@@ -90,6 +90,65 @@ app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
   }
 });
 
+// ── API: Kiểm tra dữ liệu thiếu trong DB ──────────────────
+app.get('/api/check-missing', ui.requireAuth, async (req, res) => {
+  const cfg         = storage.load();
+  const phpProxyUrl = cfg.php_server_url;
+  const phpSecret   = (cfg.php_push_secret || '').trim();
+
+  if (!phpProxyUrl || !phpSecret) {
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret!' });
+  }
+
+  const { type = 'vietlott', games = '', regions = '', from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ ok: false, msg: 'Thiếu from / to' });
+
+  // Thay crawl-save.php → check-missing.php
+  const checkUrl = phpProxyUrl.replace(/crawl-save\.php.*$/, 'check-missing.php');
+
+  const payload = { type, from, to };
+  if (games)   payload.games   = games.split(',').filter(Boolean);
+  if (regions) payload.regions = regions.split(',').filter(Boolean);
+
+  try {
+    const r = await fetch(checkUrl, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Bot-Secret': phpSecret },
+      body:    JSON.stringify(payload),
+    });
+    const data = await r.json();
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ ok: false, msg: e.message });
+  }
+});
+
+// ── API: Kiểm tra số thiếu trong record đã có trong DB ───────────────
+app.get('/api/check-incomplete', ui.requireAuth, async (req, res) => {
+  const cfg         = storage.load();
+  const phpProxyUrl = cfg.php_server_url;
+  const phpSecret   = (cfg.php_push_secret || '').trim();
+  if (!phpProxyUrl || !phpSecret)
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret!' });
+
+  const { games = '', from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ ok: false, msg: 'Thiếu from / to' });
+
+  const checkUrl = phpProxyUrl.replace(/crawl-save\.php.*$/, 'check-missing.php');
+  const payload  = { type: 'incomplete', from, to, games: games.split(',').filter(Boolean) };
+
+  try {
+    const r    = await fetch(checkUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Bot-Secret': phpSecret },
+      body: JSON.stringify(payload),
+    });
+    res.json(await r.json());
+  } catch (e) {
+    res.status(500).json({ ok: false, msg: e.message });
+  }
+});
+
 // ── API: Crawl 3 Miền (XSMB, XSMN, XSMT) ─────────────────
 app.post('/api/crawler/mien', ui.requireAuth, async (req, res) => {
   const cfg = storage.load();
