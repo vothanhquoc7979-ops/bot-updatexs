@@ -633,9 +633,6 @@ router.get('/', requireAuth, (req, res) => {
       const body = {
         telegram_bot_token: fd.get('telegram_bot_token'),
         telegram_chat_id:   fd.get('telegram_chat_id'),
-        php_host:           fd.get('php_host'),
-        php_push_secret:    fd.get('php_push_secret'),
-        php_server_url:     fd.get('php_server_url'),
         gemini_api_key:     fd.get('gemini_api_key'),
         auto_schedule:      fd.get('auto_schedule') === 'true',
       };
@@ -643,6 +640,34 @@ router.get('/', requireAuth, (req, res) => {
       const d = await r.json();
       flash(d.ok ? 'Đã lưu cấu hình! Bot đang restart...' : (d.msg || 'Lỗi'), d.ok);
     });
+
+    // ── Quản lý Sites ───────────────────────────────────
+    window.addSite = async function() {
+      var domain = (document.getElementById('new-site-domain').value || '').trim().replace(/\/+$/, '');
+      var secret = (document.getElementById('new-site-secret').value || '').trim();
+      var msgEl  = document.getElementById('site-add-msg');
+      if (!domain || !secret) { msgEl.textContent = '⚠️ Nhập đủ Domain và Secret!'; msgEl.style.color = '#ffa726'; return; }
+      if (!domain.startsWith('http')) { msgEl.textContent = '⚠️ Phải bắt đầu bằng https://'; msgEl.style.color = '#ef5350'; return; }
+      msgEl.textContent = '⏳ Đang thêm...'; msgEl.style.color = 'var(--muted)';
+      const ra = await fetch('/api/sites/add', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ domain, secret }) });
+      const da = await ra.json();
+      if (da.ok) { msgEl.textContent = '✅ Đã thêm!'; msgEl.style.color = '#4caf50'; setTimeout(function(){ location.reload(); }, 700); }
+      else { msgEl.textContent = '❌ ' + (da.msg || 'Lỗi'); msgEl.style.color = '#ef5350'; }
+    };
+    window.removeSite = async function(index) {
+      if (!confirm('Xóa site này?')) return;
+      const rb = await fetch('/api/sites/remove', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ index }) });
+      const db = await rb.json();
+      if (db.ok) { flash('Đã xóa site!'); setTimeout(function(){ location.reload(); }, 600); }
+      else flash(db.msg || 'Lỗi xóa', false);
+    };
+    window.testSite = async function(index) {
+      flash('⏳ Đang test...');
+      const rc = await fetch('/api/sites/test?index=' + index);
+      const dc = await rc.json();
+      if (dc.ok) flash('✅ ' + dc.domain + ' OK! (' + dc.ms + 'ms)');
+      else flash('❌ ' + (dc.domain||'') + ': ' + (dc.msg||'Lỗi'), false);
+    };
 
     // ── Crawl Dữ Liệu ────────────────────────────────────
     function toggleAllMien(checked) {
