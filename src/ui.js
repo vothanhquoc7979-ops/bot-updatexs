@@ -543,6 +543,34 @@ router.get('/', requireAuth, (req, res) => {
     </div><!-- /container -->
 
     <script>
+    // ── Site management (hoisted — luôn accessible) ───────
+    async function addSite() {
+      var domain = (document.getElementById('new-site-domain').value||'').trim().replace(/\/+$/,'');
+      var secret = (document.getElementById('new-site-secret').value||'').trim();
+      var m = document.getElementById('site-add-msg');
+      if (!domain||!secret){m.textContent='⚠️ Nhập đủ Domain và Secret!';m.style.color='#ffa726';return;}
+      if (!domain.startsWith('http')){m.textContent='⚠️ Domain phải bắt đầu bằng https://';m.style.color='#ef5350';return;}
+      m.textContent='⏳ Đang thêm...';m.style.color='var(--muted)';
+      var r=await fetch('/api/sites/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain:domain,secret:secret})});
+      var d=await r.json();
+      if(d.ok){m.textContent='✅ Đã thêm!';m.style.color='#4caf50';setTimeout(function(){location.reload();},700);}
+      else{m.textContent='❌ '+(d.msg||'Lỗi');m.style.color='#ef5350';}
+    }
+    async function removeSite(index) {
+      if(!confirm('Xóa site này?'))return;
+      var r=await fetch('/api/sites/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:index})});
+      var d=await r.json();
+      if(d.ok){flash('Đã xóa site!');setTimeout(function(){location.reload();},600);}
+      else flash(d.msg||'Lỗi xóa',false);
+    }
+    async function testSite(index) {
+      flash('⏳ Đang test kết nối...');
+      var r=await fetch('/api/sites/test?index='+index);
+      var d=await r.json();
+      if(d.ok)flash('✅ '+d.domain+' OK! ('+d.ms+'ms)');
+      else flash('❌ '+(d.domain||'')+': '+(d.msg||'Lỗi'),false);
+    }
+
     // ── Tab switching ─────────────────────────────────────
     function showTab(name) {
       document.getElementById('panel-dashboard').style.display = name === 'dashboard' ? '' : 'none';
