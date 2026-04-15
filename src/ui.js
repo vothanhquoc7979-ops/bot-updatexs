@@ -265,6 +265,38 @@ router.get('/api/sites/test', requireAuth, async (req, res) => {
   }
 });
 
+// ── GET /site-mgr.js (Site management functions — NO template escaping) ────
+router.get('/site-mgr.js', requireAuth, (req, res) => {
+  res.type('application/javascript').send(
+    'async function addSite(){' +
+    '  var domain=(document.getElementById("new-site-domain").value||"").trim().replace(/\\/+$/,"");' +
+    '  var secret=(document.getElementById("new-site-secret").value||"").trim();' +
+    '  var m=document.getElementById("site-add-msg");' +
+    '  if(!domain||!secret){m.textContent="⚠️ Nhập đủ Domain và Secret!";m.style.color="#ffa726";return;}' +
+    '  if(!domain.startsWith("http")){m.textContent="⚠️ Domain phải bắt đầu bằng https://";m.style.color="#ef5350";return;}' +
+    '  m.textContent="⏳ Đang thêm...";m.style.color="#888";' +
+    '  var r=await fetch("/api/sites/add",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({domain:domain,secret:secret})});' +
+    '  var d=await r.json();' +
+    '  if(d.ok){m.textContent="✅ Đã thêm!";m.style.color="#4caf50";setTimeout(function(){location.reload();},700);}' +
+    '  else{m.textContent="❌ "+(d.msg||"Lỗi");m.style.color="#ef5350";}' +
+    '}' +
+    'async function removeSite(index){' +
+    '  if(!confirm("Xóa site này?"))return;' +
+    '  var r=await fetch("/api/sites/remove",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({index:index})});' +
+    '  var d=await r.json();' +
+    '  if(d.ok){if(typeof flash==="function")flash("Đã xóa site!");setTimeout(function(){location.reload();},600);}' +
+    '  else if(typeof flash==="function")flash(d.msg||"Lỗi xóa",false);' +
+    '}' +
+    'async function testSite(index){' +
+    '  if(typeof flash==="function")flash("⏳ Đang test kết nối...");' +
+    '  var r=await fetch("/api/sites/test?index="+index);' +
+    '  var d=await r.json();' +
+    '  if(d.ok){if(typeof flash==="function")flash("✅ "+d.domain+" OK! ("+d.ms+"ms)");}' +
+    '  else if(typeof flash==="function")flash("❌ "+(d.domain||"")+": "+(d.msg||"Lỗi"),false);' +
+    '}'
+  );
+});
+
 // ── GET / (Dashboard) ─────────────────────────────────────
 router.get('/', requireAuth, (req, res) => {
   const cfg = storage.load();
@@ -543,33 +575,7 @@ router.get('/', requireAuth, (req, res) => {
     </div><!-- /container -->
 
     <script>
-    // ── Site management (hoisted — luôn accessible) ───────
-    async function addSite() {
-      var domain = (document.getElementById('new-site-domain').value||'').trim().replace(/\/+$/,'');
-      var secret = (document.getElementById('new-site-secret').value||'').trim();
-      var m = document.getElementById('site-add-msg');
-      if (!domain||!secret){m.textContent='⚠️ Nhập đủ Domain và Secret!';m.style.color='#ffa726';return;}
-      if (!domain.startsWith('http')){m.textContent='⚠️ Domain phải bắt đầu bằng https://';m.style.color='#ef5350';return;}
-      m.textContent='⏳ Đang thêm...';m.style.color='var(--muted)';
-      var r=await fetch('/api/sites/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain:domain,secret:secret})});
-      var d=await r.json();
-      if(d.ok){m.textContent='✅ Đã thêm!';m.style.color='#4caf50';setTimeout(function(){location.reload();},700);}
-      else{m.textContent='❌ '+(d.msg||'Lỗi');m.style.color='#ef5350';}
-    }
-    async function removeSite(index) {
-      if(!confirm('Xóa site này?'))return;
-      var r=await fetch('/api/sites/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:index})});
-      var d=await r.json();
-      if(d.ok){flash('Đã xóa site!');setTimeout(function(){location.reload();},600);}
-      else flash(d.msg||'Lỗi xóa',false);
-    }
-    async function testSite(index) {
-      flash('⏳ Đang test kết nối...');
-      var r=await fetch('/api/sites/test?index='+index);
-      var d=await r.json();
-      if(d.ok)flash('✅ '+d.domain+' OK! ('+d.ms+'ms)');
-      else flash('❌ '+(d.domain||'')+': '+(d.msg||'Lỗi'),false);
-    }
+
 
     // ── Tab switching ─────────────────────────────────────
     function showTab(name) {
@@ -669,33 +675,6 @@ router.get('/', requireAuth, (req, res) => {
       flash(d.ok ? 'Đã lưu cấu hình! Bot đang restart...' : (d.msg || 'Lỗi'), d.ok);
     });
 
-    // ── Quản lý Sites ───────────────────────────────────
-    window.addSite = async function() {
-      var domain = (document.getElementById('new-site-domain').value || '').trim().replace(/\/+$/, '');
-      var secret = (document.getElementById('new-site-secret').value || '').trim();
-      var msgEl  = document.getElementById('site-add-msg');
-      if (!domain || !secret) { msgEl.textContent = '⚠️ Nhập đủ Domain và Secret!'; msgEl.style.color = '#ffa726'; return; }
-      if (!domain.startsWith('http')) { msgEl.textContent = '⚠️ Phải bắt đầu bằng https://'; msgEl.style.color = '#ef5350'; return; }
-      msgEl.textContent = '⏳ Đang thêm...'; msgEl.style.color = 'var(--muted)';
-      const ra = await fetch('/api/sites/add', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ domain, secret }) });
-      const da = await ra.json();
-      if (da.ok) { msgEl.textContent = '✅ Đã thêm!'; msgEl.style.color = '#4caf50'; setTimeout(function(){ location.reload(); }, 700); }
-      else { msgEl.textContent = '❌ ' + (da.msg || 'Lỗi'); msgEl.style.color = '#ef5350'; }
-    };
-    window.removeSite = async function(index) {
-      if (!confirm('Xóa site này?')) return;
-      const rb = await fetch('/api/sites/remove', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ index }) });
-      const db = await rb.json();
-      if (db.ok) { flash('Đã xóa site!'); setTimeout(function(){ location.reload(); }, 600); }
-      else flash(db.msg || 'Lỗi xóa', false);
-    };
-    window.testSite = async function(index) {
-      flash('⏳ Đang test...');
-      const rc = await fetch('/api/sites/test?index=' + index);
-      const dc = await rc.json();
-      if (dc.ok) flash('✅ ' + dc.domain + ' OK! (' + dc.ms + 'ms)');
-      else flash('❌ ' + (dc.domain||'') + ': ' + (dc.msg||'Lỗi'), false);
-    };
 
     // ── Crawl Dữ Liệu ────────────────────────────────────
     function toggleAllMien(checked) {
@@ -1021,7 +1000,7 @@ router.get('/', requireAuth, (req, res) => {
     fetchStatus();
     setInterval(fetchStatus, 5000);
     </script>
-  `, ''));
+  `, '<script src="/site-mgr.js"></script>'));
 });
 
 module.exports = router;
