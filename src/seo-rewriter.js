@@ -135,13 +135,19 @@ function parseHtml(html, url) {
 // ── Gọi Groq / OpenRouter API ───────────────────────────────────────────────
 async function callAI(apiKey, model, systemPrompt, userPrompt, apiBase) {
   const base = (apiBase || 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
+
+  // OpenRouter free tier: TPM limit ~8000 → request (input + max_tokens) phải < 8000
+  // Groq native: không giới hạn ketat → dùng 8192
+  const isOpenRouter = model.includes('/');
+  const maxTokens    = isOpenRouter ? 4096 : 8192;
+
   const body = JSON.stringify({
     model,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user',   content: userPrompt   },
     ],
-    max_tokens : 8192, // đủ cho JSON 1500+ từ HTML (~5000 tokens output)
+    max_tokens : maxTokens,
     temperature: 0.72,
   });
 
@@ -160,7 +166,11 @@ async function callAI(apiKey, model, systemPrompt, userPrompt, apiBase) {
   if (!res.ok) {
     const err         = await res.json().catch(() => ({}));
     const msg         = err?.error?.message || `HTTP ${res.status}`;
-    const isExhausted = res.status === 429 || msg.includes('rate_limit') || msg.includes('quota');
+    const isExhausted = res.status === 429
+                     || msg.includes('rate_limit')
+                     || msg.includes('quota')
+                     || msg.includes('Request too large')  // OpenRouter TPM exceeded
+                     || msg.includes('tokens per minute');  // rate limit variant
     const e           = new Error(`[API] ${msg}`);
     e.exhausted       = isExhausted;
     throw e;
@@ -171,8 +181,15 @@ async function callAI(apiKey, model, systemPrompt, userPrompt, apiBase) {
 }
 
 // ── Build prompt SEO (trả về JSON) ───────────────────────────────────────────
-function buildSeoPrompt(pageData) {
-  const { title, description, text, url } = pageData;
+function buildSeoPrompt(pageData, model) {
+  const { title, description, url } = pageData;
+
+  // OpenRouter free tier có input limit thấp → cắt text ngắn hơn
+  const isOpenRouter = (model || '').includes('/');
+  const textCap      = isOpenRouter ? 2000 : 4000;
+  const text         = (pageData.text || '').length > textCap
+    ? pageData.text.slice(0, textCap) + '...'
+    : (pageData.text || '');
 
   const system = `Bạn là chuyên gia SEO Content Writer Việt Nam với 10+ năm kinh nghiệm.
 Nhiệm vụ: viết lại bài theo chuẩn SEO on-page Google 2024 và trả về JSON thuần túy.
@@ -311,7 +328,7 @@ async function rewriteArticleSEO(pageData, overrideModel) {
 
   const model   = overrideModel || cfg.groq_default_model || 'llama-3.3-70b-versatile';
   const apiBase = cfg.groq_api_base || 'https://api.groq.com/openai/v1';
-  const { system, user } = buildSeoPrompt(pageData);
+  const { system, user } = buildSeoPrompt(pageData, model); // model → điều chỉnh text cap
 
   let lastError = null;
   for (const keyObj of available) {
