@@ -80,14 +80,15 @@ function formatLiveNumbers(gameType, d) {
  * Kiểm tra data có đầy đủ không trước khi coi là "xổ xong".
  * Chỉ set isDoneForToday=true khi BOTH: API isDone=true và data này trả về true.
  */
-function isDataComplete(game, formattedObj) {
+  function isDataComplete(game, formattedObj) {
     const nums = formattedObj.numbers || '';
     // Còn placeholder '?' trong số → chưa đủ
     if (!nums || nums.includes('?')) return false;
 
     if (game === 'power655') {
-        // Cần cả hai jackpot (jackpot1 và jackpot2)
-        return !!(formattedObj.jackpot && formattedObj.jackpot2);
+        // Cần ít nhất jackpot1 (pool tích lũy, luôn > 0)
+        // Jackpot2 có thể không có nếu kỳ này không ai thắng
+        return !!(formattedObj.jackpot);
     }
     if (game === 'mega645') {
         // 6 bóng
@@ -109,7 +110,32 @@ function isDataComplete(game, formattedObj) {
     return true;
 }
 
+
 const liveState = {};
+
+// ── Lấy jackpot từ static JSON API (GitHub) khi live API không có ──────────
+async function tryFetchJackpotStatic(game, dateStr) {
+    try {
+        const [y, m, d] = dateStr.split('-');
+        const url = `https://raw.githubusercontent.com/vothanhquoc7979-ops/kho-dulieu-xoso/main/data/${y}/${m}/${d}.json`;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 10000);
+        const res = await fetch(url, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!res.ok) return null;
+        const json = await res.json();
+        const gData = json?.vietlott?.[game];
+        if (!gData) return null;
+        let jp1 = gData.jackpot1 ?? gData.jackpot ?? null;
+        let jp2 = gData.jackpot2 ?? null;
+        if (jp1 !== null) jp1 = String(jp1).replace(/\D/g, '');
+        if (jp2 !== null) jp2 = String(jp2).replace(/\D/g, '');
+        if (!jp1) return null; // không có jackpot trong static API
+        return { jackpot: jp1, jackpot2: jp2 || '' };
+    } catch (_) {
+        return null;
+    }
+}
 
 async function pollLiveKetquaPlus(game, onLog) {
     let apiProduct = game;
@@ -145,9 +171,10 @@ async function pollLiveKetquaPlus(game, onLog) {
         const padSpecial = n => (n === null || n === undefined || n === '') ? '?' : String(n).padStart(2, '0');
         let powerBall = d.specialNum !== undefined ? padSpecial(d.specialNum) : null;
         
-        let jackpot1 = d.jackpot1 || d.jackpot || '';
+        // Đọc jackpot từ cả data level và root level
+        let jackpot1 = d.jackpot1 || d.jackpot || result.jackpot1 || result.jackpot || '';
         if (jackpot1) jackpot1 = String(jackpot1).replace(/\D/g, '');
-        let jackpot2 = d.jackpot2 || '';
+        let jackpot2 = d.jackpot2 || result.jackpot2 || '';
         if (jackpot2) jackpot2 = String(jackpot2).replace(/\D/g, '');
 
         let drawDateStr = result.date || '';
@@ -207,6 +234,34 @@ async function pollLiveKetquaPlus(game, onLog) {
                 clearInterval(liveState[game].timer);
                 liveState[game].timer = null;
                 liveState[game].isDoneForToday = true;
+            } else if (game === 'power655' || game === 'mega645') {
+                // isDone nhưng chưa có jackpot → thử lấy từ static API
+                onLog(`[LIVE] ${game.toUpperCase()} isDone nhưng chưa có jackpot → thử static API...`);
+                const jpData = await tryFetchJackpotStatic(game, formattedObj.draw_date);
+                if (jpData) {
+                    formattedObj.jackpot  = jpData.jackpot;
+                    formattedObj.jackpot2 = jpData.jackpot2;
+                    onLog(`[LIVE] ${game.toUpperCase()} Lấy jackpot từ static API: JP1=${jpData.jackpot} JP2=${jpData.jackpot2}`);
+                    // Push data cập nhật jackpot lên tất cả sites
+                    const { pushToOneSite } = require('./pusher');
+                    const { getSites } = require('./storage');
+                    const sites = getSites();
+                    if (sites.length > 0) {
+                        await Promise.allSettled(
+                            sites.map(({ domain, secret }) =>
+                                pushToOneSite(domain, secret, '/api/crawl-save.php', JSON.stringify(formattedObj))
+                            )
+                        );
+                    }
+                    if (isDataComplete(game, formattedObj)) {
+                        onLog(`[LIVE] ${game.toUpperCase()} Jackpot đã đầy đủ! Tắt polling.`);
+                        clearInterval(liveState[game].timer);
+                        liveState[game].timer = null;
+                        liveState[game].isDoneForToday = true;
+                    }
+                } else {
+                    onLog(`[LIVE] ${game.toUpperCase()} Static API chưa có jackpot, tiếp tục poll...`);
+                }
             } else {
                 onLog(`[LIVE] ${game.toUpperCase()} API isDone nhưng jackpot/tiers chưa đủ, tiếp tục poll...`);
             }
