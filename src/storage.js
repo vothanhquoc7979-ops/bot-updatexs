@@ -16,8 +16,11 @@ const DEFAULTS = {
   php_push_secret:    '',   // legacy
   php_server_url:     '',   // legacy
   auto_schedule:      true,
-  gemini_api_key:     '',
-  sites: [],  // [{ domain: 'https://site.com', secret: 'xxx' }]
+  gemini_api_key:     '',   // legacy (kept for backward compat)
+  groq_keys: [],  // [{ name:'API-1', key:'gsk_...', exhausted:false }]
+  groq_default_model: 'llama-3.3-70b-versatile', // model mặc định cho SEO rewriter
+  groq_api_base:      'https://api.groq.com/openai/v1', // Groq hoặc OpenRouter
+  sites: [],      // [{ domain:'https://site.com', secret:'xxx' }]
 };
 
 function load() {
@@ -74,4 +77,29 @@ function getSites() {
   return [];
 }
 
-module.exports = { load, save, get, getSites };
+
+/**
+ * Lấy Groq API key còn khả dụng (chưa exhausted).
+ * Trả về { name, key } hoặc null nếu không còn key nào.
+ */
+function getActiveGroqKey() {
+  const cfg = load();
+  const keys = Array.isArray(cfg.groq_keys) ? cfg.groq_keys : [];
+  return keys.find(k => k.key && !k.exhausted) || null;
+}
+
+/**
+ * Đánh dấu key theo tên là exhausted (hết token).
+ */
+function markGroqKeyExhausted(name) {
+  const cfg = load();
+  const keys = Array.isArray(cfg.groq_keys) ? cfg.groq_keys : [];
+  const idx = keys.findIndex(k => k.name === name);
+  if (idx >= 0) {
+    keys[idx].exhausted = true;
+    save({ groq_keys: keys });
+    console.log(`[Groq] Key "${name}" đã hết token → đánh dấu exhausted.`);
+  }
+}
+
+module.exports = { load, save, get, getSites, getActiveGroqKey, markGroqKeyExhausted };

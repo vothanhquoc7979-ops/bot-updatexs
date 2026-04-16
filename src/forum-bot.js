@@ -27,135 +27,175 @@ async function fetchChatHistory(historyUrl) {
         if (!res.ok) return [];
         const json = await res.json();
         if (json.success && json.messages) {
-            // Lấy 3 tin mới nhất
             return json.messages.slice(-3).map(m => `[${m.name}]: ${m.message.replace(/<[^>]+>/g, '')}`);
         }
     } catch(e) {}
     return [];
 }
 
-async function generateGeminiMessage(apiKey, personaType, historyContext) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-    
-    // Ánh xạ tính cách cho Prompt
-    const typeDict = {
-        'lao_lang': 'Một ông lão giàu kinh nghiệm, hay nói đạo lý, khuyên răn người trẻ, chốt kèo an toàn.',
-        'dan_choi': 'Một thanh niên liều mạng, khát nước, hay xúi all in, thích khoe tiếng to.',
-        'den_dui': 'Một kẻ cực kỳ đen đủi, than khóc ỉ ôi, cầu cứu người khác vì xa bờ.',
-        'chuyen_gia': 'Một kỹ sư/người thống kê, dùng từ ngữ chuyên môn (tỷ lệ, đồ thị, phương sai, nhịp)',
-        'dan_que': 'Một nông dân mộc mạc, dùng đại từ thôn quê (mấy thím, mí chế, tui), bắt số qua yếu tố đời thường tâm linh.'
-    };
-    
-    const role = typeDict[personaType] || 'Dân chơi xổ số';
-    let prompt = `Bạn đang nhắn tin trên diễn đàn xổ số lô đề. Dĩ vãng của bạn: ${role}.\n`;
-    
-    if (historyContext && historyContext.length > 0) {
-        prompt += `Dưới đây là một số tin nhắn gần đây của người khác để bạn có thể a dua, hùa theo hoặc bình luận:\n${historyContext.join('\n')}\n`;
-        prompt += `Hãy viết 1 câu trả lời ngắn (10-25 chữ) mang đúng tính cách của bạn, có thể réo tên hoặc hùa theo câu nói của người trên một cách mộc mạc tự nhiên.\n`;
-    } else {
-        prompt += `Hãy viết 1 bình luận ngắn (10-25 chữ) thể hiện rõ ràng tính cách trên. Có thể than thở, thả số hoặc a dua. Ngôn ngữ mạng bình dân.\n`;
-    }
-    prompt += `KHÔNG CẦN NGOẶC KÉP. CHỈ IN RA TIN NHẮN TRỰC TIẾP. Rất hạn chế đưa ra số Bạch thủ trần trụi trừ khi bạn là Dân Chơi.`;
+// ── Groq AI (thay Gemini) — auto-rotate keys ──────────────────────────────
+// Forum bot dùng model nhẹ để tốc độ + tiết kiệm token.
+// Model mạnh hơn (OpenRouter) được dùng trong /link SEO rewriter.
+const GROQ_MODELS_FORUM = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile'];
 
-    const res = await fetch(url, {
+async function callGroqOnce(apiKey, model, prompt) {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        headers: {
+            'Content-Type':  'application/json',
+            'Authorization': 'Bearer ' + apiKey,
+        },
+        body: JSON.stringify({
+            model:      model,
+            messages:   [{ role: 'user', content: prompt }],
+            max_tokens: 80,
+            temperature: 0.85,
+        }),
     });
-    if (!res.ok) throw new Error("API Gemini phản hồi lỗi");
+    if (res.status === 429) throw Object.assign(new Error('rate_limit_exceeded'), { exhausted: true });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const code = (err.error && err.error.code) || '';
+        if (code === 'rate_limit_exceeded' || code === 'insufficient_quota') {
+            throw Object.assign(new Error(code), { exhausted: true });
+        }
+        throw new Error('Groq API lỗi ' + res.status);
+    }
     const data = await res.json();
-    return data.candidates[0].content.parts[0].text.trim();
+    return data.choices[0].message.content.trim();
+}
+
+async function generateGroqMessage(personaType, historyContext) {
+    const typeDict = {
+        'lao_lang':   'Một ông lão giàu kinh nghiệm, hay nói đạo lý, khuyên răn người trẻ, chốt kèo an toàn.',
+        'dan_choi':   'Một thanh niên liều mạng, khát nước, hay xúi all in, thích khoe tiếng to.',
+        'den_dui':    'Một kẻ cực kỳ đen đủi, than khóc ỉ ôi, cầu cứu người khác vì xa bờ.',
+        'chuyen_gia': 'Một kỹ sư/người thống kê, dùng từ ngữ chuyên môn (tỷ lệ, đồ thị, phương sai, nhịp)',
+        'dan_que':    'Một nông dân mộc mạc, dùng đại từ thôn quê (mấy thím, mí chế, tui), bắt số qua yếu tố đời thường tâm linh.',
+    };
+    const role = typeDict[personaType] || 'Dân chơi xổ số';
+    let prompt = `Bạn đang nhắn tin trên diễn đàn xổ số lô đề. Tính cách: ${role}\n`;
+    if (historyContext && historyContext.length > 0) {
+        prompt += `Tin nhắn gần đây:\n${historyContext.join('\n')}\n`;
+        prompt += `Viết 1 câu trả lời ngắn (10-25 chữ) mang đúng tính cách, mộc mạc tự nhiên.\n`;
+    } else {
+        prompt += `Viết 1 bình luận ngắn (10-25 chữ) thể hiện rõ tính cách. Ngôn ngữ mạng bình dân.\n`;
+    }
+    prompt += `KHÔNG NGOẶC KÉP. CHỈ IN TIN NHẮN THÔI.`;
+
+    // Forum bot luôn dùng model nhẹ (fast + tiết kiệm token); model mạnh dành cho /link
+    const model = Math.random() < 0.7 ? GROQ_MODELS_FORUM[0] : GROQ_MODELS_FORUM[1];
+
+    // Auto-rotate: thử từng key, nếu exhausted thì đánh dấu và chuyển sang key tiếp
+    const cfg = storage.load();
+    const keys = Array.isArray(cfg.groq_keys) ? cfg.groq_keys : [];
+    const available = keys.filter(k => k.key && !k.exhausted);
+
+    if (available.length === 0) throw new Error('Không có Groq API key khả dụng');
+
+    for (const keyObj of available) {
+        try {
+            const text = await callGroqOnce(keyObj.key, model, prompt);
+            console.log(`[Groq/${keyObj.name}/${model}] OK`);
+            return text;
+        } catch (e) {
+            if (e.exhausted) {
+                storage.markGroqKeyExhausted(keyObj.name);
+                console.log(`[Groq] "${keyObj.name}" hết token → thử key tiếp theo...`);
+                continue;
+            }
+            throw e;
+        }
+    }
+    throw new Error('Tất cả Groq API keys đã hết token');
 }
 
 async function postForumMessage() {
-    const phpProxyUrl = storage.get('php_server_url') || process.env.PHP_PROXY_URL;
+    // Lấy PHP URL từ sites[] hoặc legacy config
+    const sites = storage.getSites();
+    const phpProxyUrl = sites.length > 0
+        ? sites[0].domain + '/api/crawl-save.php'
+        : (storage.get('php_server_url') || process.env.PHP_PROXY_URL || '');
+
     if (!phpProxyUrl) {
-      console.log("[AutoForumBot] Chưa cấu hình PHP Server URL (proxy). Đợi 1 phút kiểm tra lại...");
-      setTimeout(postForumMessage, 60000);
-      return;
+        console.log('[AutoForumBot] Chưa cấu hình PHP Server URL. Đợi 1 phút...');
+        setTimeout(postForumMessage, 60000);
+        return;
     }
-    
-    // Gateway push chat & Get history
-    const targetUrl = phpProxyUrl.includes('api/crawl-save.php') 
-        ? phpProxyUrl.replace('api/crawl-save.php', 'api/forum-bot-save.php') 
-        : phpProxyUrl.replace('/crawl-save.php', '/forum-bot-save.php');
-        
-    const historyUrl = phpProxyUrl.includes('api/crawl-save.php') 
-        ? phpProxyUrl.replace('api/crawl-save.php', 'forum/api.php?action=fetch') 
-        : phpProxyUrl.replace('/crawl-save.php', '') + '/../forum/api.php?action=fetch';
-    
-    // 1. Pick a random bot: bot_001 -> bot_100
-    const botIdx = Math.floor(Math.random() * 100);
+
+    const targetUrl  = phpProxyUrl.replace('crawl-save.php', 'forum-bot-save.php');
+    const historyUrl = phpProxyUrl.replace('api/crawl-save.php', 'forum/api.php?action=fetch');
+
+    // Pick a random bot: bot_001 → bot_100
+    const botIdx   = Math.floor(Math.random() * 100);
     const botNoStr = (botIdx + 1).toString().padStart(3, '0');
-    
-    const pTypes = ['lao_lang', 'dan_choi', 'den_dui', 'chuyen_gia', 'dan_que'];
-    const myType = pTypes[botIdx % 5];
+    const pTypes   = ['lao_lang', 'dan_choi', 'den_dui', 'chuyen_gia', 'dan_que'];
+    const myType   = pTypes[botIdx % 5];
     const botEmail = `bot_${botNoStr}_${myType}@xoso-bot.local`;
-    
-    // 2. Decide Chat Mechanism (15% AI vs 85% Template)
+
+    // Decide: 20% AI (Groq), 80% Template
     let message = '';
-    const geminiKey = storage.get('gemini_api_key');
-    let usedAI = false;
-    
-    if (geminiKey && Math.random() < 0.15) {
+    let usedAI  = false;
+
+    const cfg  = storage.load();
+    const hasGroqKeys = Array.isArray(cfg.groq_keys) && cfg.groq_keys.some(k => k.key && !k.exhausted);
+
+    if (hasGroqKeys && Math.random() < 0.20) {
         try {
-            console.log(`[AutoForumBot/AI] ${myType} đang nhặt tin nhắn trên diễn đàn để rep...`);
+            console.log(`[AutoForumBot/Groq] ${myType} đang tạo tin nhắn AI...`);
             const hCtx = await fetchChatHistory(historyUrl);
-            message = await generateGeminiMessage(geminiKey, myType, hCtx);
-            usedAI = true;
+            message = await generateGroqMessage(myType, hCtx);
+            usedAI  = true;
         } catch(e) {
-            console.log(`[AutoForumBot] Lỗi AI (${e.message}) => Trở về kịch bản Offline.`);
+            console.log(`[AutoForumBot] Lỗi Groq (${e.message}) → Dùng template.`);
         }
     }
-    
+
     if (!usedAI) {
-        // Áp dụng Tỷ lệ tĩnh: 40% Emotion, 20% Analysis, 20% Hints, 20% Numbers
         const randRatio = Math.random();
         let bucket = 'A_D';
         if (randRatio < 0.40)      bucket = 'A_D';
         else if (randRatio < 0.60) bucket = 'B';
         else if (randRatio < 0.80) bucket = 'C';
         else                       bucket = 'E';
-        
+
         let pool = personas[myType] && personas[myType][bucket];
-        if (!pool || pool.length === 0) pool = ["Hôm nay buồn trôi theo dòng sông..."];
-        
+        if (!pool || pool.length === 0) pool = ['Hôm nay buồn trôi theo dòng sông...'];
+
         const rawTpl = pool[Math.floor(Math.random() * pool.length)];
         message = processTemplate(rawTpl);
     }
-    
-    // Clean string & Auto Highlight Numbers
+
+    // Clean & highlight numbers
     message = message.replace(/^"|"$/g, '');
     message = formatNumbersInText(message);
-    
-    // 3. Đẩy lên server PHP
+
+    // Push lên tất cả sites
+    const secret = sites.length > 0 ? sites[0].secret : (storage.get('php_push_secret') || process.env.BOT_PUSH_SECRET || '');
     try {
-      const res = await fetch(targetUrl, {
-          method: 'POST',
-          headers: {
-             'Content-Type': 'application/json',
-             'X-Bot-Secret': storage.get('php_push_secret') || process.env.BOT_PUSH_SECRET || ''
-          },
-          body: JSON.stringify({ bot_email: botEmail, message })
-      });
-      const json = await res.json();
-      if (json.ok) {
-         console.log(`\n💬 [${json.msg.name}] vừa chém (${myType}): "${message}"`);
-      } else {
-         console.log(`[AutoForumBot] Server từ chối ghim: ${json.error}`);
-      }
+        const res  = await fetch(targetUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Bot-Secret': secret },
+            body: JSON.stringify({ bot_email: botEmail, message }),
+        });
+        const json = await res.json();
+        if (json.ok) {
+            console.log(`\n💬 [${json.msg.name}] chém (${myType}${usedAI ? '/AI' : ''}): "${message}"`);
+        } else {
+            console.log(`[AutoForumBot] Server từ chối: ${json.error}`);
+        }
     } catch(e) {
-      console.log(`[AutoForumBot] Mất kết nối tới Server: ${e.message}`);
+        console.log(`[AutoForumBot] Mất kết nối: ${e.message}`);
     }
-    
-    // 4. Random delay (30s - 5 phút = 30 -> 300s)
-    const nextSeconds = Math.floor(Math.random() * (300 - 30) + 30);
-    console.log(`[AutoForumBot] Đã hẹn giờ cho bot tiếp theo lót gạch sau ${nextSeconds} giây...`);
-    setTimeout(postForumMessage, nextSeconds * 1000);
+
+    // Random delay 30s – 5 phút
+    const nextSec = Math.floor(Math.random() * (300 - 30) + 30);
+    console.log(`[AutoForumBot] Bot tiếp theo sau ${nextSec}s...`);
+    setTimeout(postForumMessage, nextSec * 1000);
 }
 
-// Start Cycle
-console.log("=========================================");
-console.log("🚀 KHỞI ĐỘNG CỖ MÁY DIỄN ĐÀN PRO 100 BOTS");
-console.log("=========================================");
+// ── Start ──
+console.log('=========================================');
+console.log('🚀 KHỞI ĐỘNG CỖ MÁY DIỄN ĐÀN PRO 100 BOTS');
+console.log('=========================================');
 postForumMessage();

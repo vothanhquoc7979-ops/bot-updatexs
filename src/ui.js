@@ -185,11 +185,10 @@ router.post('/api/control', requireAuth, express.json(), (req, res) => {
 // ── POST /api/save-config ─────────────────────────────────
 router.post('/api/save-config', requireAuth, express.json(), async (req, res) => {
   try {
-    const { telegram_bot_token, telegram_chat_id, auto_schedule, gemini_api_key } = req.body;
+    const { telegram_bot_token, telegram_chat_id, auto_schedule } = req.body;
     storage.save({
       telegram_bot_token: (telegram_bot_token || '').trim(),
       telegram_chat_id:   (telegram_chat_id   || '').trim(),
-      gemini_api_key:     (gemini_api_key     || '').trim(),
       auto_schedule:      auto_schedule === true || auto_schedule === 'true',
     });
     logger.log('✅ Đã lưu cấu hình mới. Restarting bot...');
@@ -200,6 +199,28 @@ router.post('/api/save-config', requireAuth, express.json(), async (req, res) =>
     res.json({ ok: false, msg: e.message });
   }
 });
+
+// ── POST /api/save-groq-settings ────────────────────────────
+router.post('/api/save-groq-settings', requireAuth, express.json(), (req, res) => {
+  try {
+    const { groq_default_model, groq_api_base } = req.body;
+    const { AVAILABLE_MODELS } = require('./seo-rewriter');
+    const validIds = AVAILABLE_MODELS.map(m => m.id);
+    if (groq_default_model && !validIds.includes(groq_default_model)) {
+      return res.json({ ok: false, msg: 'Model không hợp lệ' });
+    }
+    const updates = {};
+    if (groq_default_model) updates.groq_default_model = groq_default_model;
+    if (groq_api_base)      updates.groq_api_base      = groq_api_base.trim().replace(/\/+$/, '');
+    storage.save(updates);
+    logger.log(`✅ Groq settings: model=${groq_default_model || '(không đổi)'} base=${groq_api_base || '(không đổi)'}`);
+    res.json({ ok: true });
+  } catch (e) {
+    res.json({ ok: false, msg: e.message });
+  }
+});
+
+
 
 // ── POST /api/sites/add ────────────────────────────────────
 router.post('/api/sites/add', requireAuth, express.json(), (req, res) => {
@@ -265,6 +286,50 @@ router.get('/api/sites/test', requireAuth, async (req, res) => {
   }
 });
 
+// ── POST /api/groq/add ────────────────────────────────────
+router.post('/api/groq/add', requireAuth, express.json(), (req, res) => {
+  try {
+    const { key, name } = req.body;
+    if (!key) return res.json({ ok: false, msg: 'Thiếu API key' });
+    const cfg  = storage.load();
+    const keys = Array.isArray(cfg.groq_keys) ? cfg.groq_keys : [];
+    if (keys.find(k => k.key === key.trim())) return res.json({ ok: false, msg: 'Key đã tồn tại!' });
+    const autoName = name && name.trim() ? name.trim() : `API-${keys.length + 1}`;
+    keys.push({ name: autoName, key: key.trim(), exhausted: false });
+    storage.save({ groq_keys: keys });
+    logger.log(`✅ Đã thêm Groq key: ${autoName}`);
+    res.json({ ok: true, name: autoName, count: keys.length });
+  } catch (e) { res.json({ ok: false, msg: e.message }); }
+});
+
+// ── POST /api/groq/remove ─────────────────────────────────
+router.post('/api/groq/remove', requireAuth, express.json(), (req, res) => {
+  try {
+    const index = parseInt(req.body.index ?? -1, 10);
+    const cfg   = storage.load();
+    const keys  = Array.isArray(cfg.groq_keys) ? [...cfg.groq_keys] : [];
+    if (index < 0 || index >= keys.length) return res.json({ ok: false, msg: 'Index không hợp lệ' });
+    const removed = keys.splice(index, 1);
+    storage.save({ groq_keys: keys });
+    logger.log(`🗑 Đã xóa Groq key: ${removed[0]?.name}`);
+    res.json({ ok: true, count: keys.length });
+  } catch (e) { res.json({ ok: false, msg: e.message }); }
+});
+
+// ── POST /api/groq/reset ──────────────────────────────────
+router.post('/api/groq/reset', requireAuth, express.json(), (req, res) => {
+  try {
+    const index = parseInt(req.body.index ?? -1, 10);
+    const cfg   = storage.load();
+    const keys  = Array.isArray(cfg.groq_keys) ? [...cfg.groq_keys] : [];
+    if (index < 0 || index >= keys.length) return res.json({ ok: false, msg: 'Index không hợp lệ' });
+    keys[index].exhausted = false;
+    storage.save({ groq_keys: keys });
+    logger.log(`♻️ Reset Groq key: ${keys[index].name}`);
+    res.json({ ok: true, name: keys[index].name });
+  } catch (e) { res.json({ ok: false, msg: e.message }); }
+});
+
 // ── GET /site-mgr.js (Site management functions — NO template escaping) ────
 router.get('/site-mgr.js', requireAuth, (req, res) => {
   res.type('application/javascript').send(
@@ -297,10 +362,197 @@ router.get('/site-mgr.js', requireAuth, (req, res) => {
   );
 });
 
+// ── GET /groq-mgr.js (Groq key management — NO template escaping) ──────────
+router.get('/groq-mgr.js', requireAuth, (req, res) => {
+  res.type('application/javascript').send(
+    'async function addGroqKey(){' +
+    '  var key=(document.getElementById("new-groq-key").value||"").trim();' +
+    '  var name=(document.getElementById("new-groq-name").value||"").trim();' +
+    '  var m=document.getElementById("groq-add-msg");' +
+    '  if(!key){m.textContent="⚠️ Nhập API Key!";m.style.color="#ffa726";return;}' +
+    '  m.textContent="⏳ Đang thêm...";m.style.color="#888";' +
+    '  var r=await fetch("/api/groq/add",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:key,name:name})});' +
+    '  var d=await r.json();' +
+    '  if(d.ok){m.textContent="✅ Đã thêm "+d.name+"!";m.style.color="#4caf50";setTimeout(function(){location.reload();},700);}' +
+    '  else{m.textContent="❌ "+(d.msg||"Lỗi");m.style.color="#ef5350";}' +
+    '}' +
+    'async function removeGroqKey(index){' +
+    '  if(!confirm("Xóa Groq key này?"))return;' +
+    '  var r=await fetch("/api/groq/remove",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({index:index})});' +
+    '  var d=await r.json();' +
+    '  if(d.ok){if(typeof flash==="function")flash("Đã xóa key!");setTimeout(function(){location.reload();},600);}' +
+    '  else if(typeof flash==="function")flash(d.msg||"Lỗi xóa",false);' +
+    '}' +
+    'async function resetGroqKey(index){' +
+    '  var r=await fetch("/api/groq/reset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({index:index})});' +
+    '  var d=await r.json();' +
+    '  if(d.ok){if(typeof flash==="function")flash("✅ "+d.name+" đã được reset!");setTimeout(function(){location.reload();},600);}' +
+    '  else if(typeof flash==="function")flash(d.msg||"Lỗi reset",false);' +
+    '}'
+  );
+});
+
+// ── GET /groq-seo-mgr.js ──────────────────────────────────────────────────
+router.get('/groq-seo-mgr.js', requireAuth, (req, res) => {
+  res.type('application/javascript').send(
+    'async function saveGroqSettings(){' +
+    '  var model=(document.getElementById("groq-model-select")?.value||"").trim();' +
+    '  var base=(document.getElementById("groq-api-base")?.value||"").trim();' +
+    '  var m=document.getElementById("groq-settings-msg");' +
+    '  if(!model&&!base){if(m)m.textContent="⚠️ Chọn model hoặc nhập API Base!";return;}' +
+    '  if(m){m.textContent="⏳ Đang lưu...";m.style.color="#888";}' +
+    '  var r=await fetch("/api/save-groq-settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({groq_default_model:model,groq_api_base:base})});' +
+    '  var d=await r.json();' +
+    '  if(d.ok){if(m){m.textContent="✅ Đã lưu! Model: "+model;m.style.color="#4caf50";}if(typeof flash==="function")flash("✅ Lưu model thành công!");}' +
+    '  else{if(m){m.textContent="❌ "+(d.msg||"Lỗi");m.style.color="#ef5350";}if(typeof flash==="function")flash(d.msg||"Lỗi",false);}' +
+    '}'
+  );
+});
+
+// ── GET /preview/:previewId/:idx ─────────────────────────────────────────────
+// Phục vụ bài viết đã tạo (trong memory session) để user xem trước
+router.get('/preview/:previewId/:idx', (req, res) => {
+  const { getSessionByPreviewId } = require('./session-store');
+  const session = getSessionByPreviewId(req.params.previewId);
+
+  if (!session || !session.articles) {
+    return res.status(404).send('<h1>404 — Không tìm thấy bài viết</h1><p>Phiên làm việc đã hết hạn hoặc không tồn tại.</p>');
+  }
+
+  const idx     = parseInt(req.params.idx, 10);
+  const article = session.articles?.[idx];
+  if (!article || article.error) {
+    return res.status(404).send(`<h1>Bài ${idx + 1} bị lỗi</h1><p>${article?.error || 'Không tìm thấy'}</p>`);
+  }
+
+  const thumbHtml = article.image
+    ? `<div style="margin-bottom:24px"><img src="data:${article.image.contentType};base64,${article.image.base64}" style="max-width:100%;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.15)"></div>`
+    : '';
+
+  const totalSites = session.articles.length;
+  const navLinks   = session.articles.map((a, i) => {
+    const dom = a.site?.domain.replace(/^https?:\/\//, '') || `Site ${i + 1}`;
+    return `<a href="/preview/${req.params.previewId}/${i}" style="${i === idx ? 'font-weight:700;color:#1a237e' : 'color:#555'}">${i + 1}. ${dom}</a>`;
+  }).join(' &nbsp;|&nbsp; ');
+
+  res.type('text/html; charset=utf-8').send(`<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Xem trước: ${(article.seoTitle || article.title || 'Bài viết').replace(/</g, '&lt;')}</title>
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:'Segoe UI',Arial,sans-serif;max-width:920px;margin:0 auto;padding:16px;color:#222;background:#f4f6fb}
+    .preview-bar{background:linear-gradient(135deg,#1a237e,#283593);color:#fff;padding:14px 20px;border-radius:10px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+    .preview-bar b{font-size:15px}
+    .preview-bar a{color:#90caf9}
+    .nav-bar{background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:10px 16px;margin-bottom:14px;font-size:13px}
+    /* SEO Panel */
+    .seo-panel{background:#fff;border-radius:10px;padding:18px 22px;margin-bottom:16px;box-shadow:0 1px 8px rgba(0,0,0,.07);border-left:4px solid #3f51b5}
+    .seo-panel h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#3f51b5;margin:0 0 14px}
+    .seo-row{display:flex;gap:8px;margin-bottom:10px;align-items:flex-start}
+    .seo-label{font-size:11px;font-weight:700;text-transform:uppercase;color:#888;min-width:120px;padding-top:2px}
+    .seo-value{font-size:13px;color:#333;flex:1;background:#f8f9ff;border-radius:5px;padding:5px 9px;border:1px solid #e3e5f5;line-height:1.5}
+    .seo-value.good{border-color:#4caf50;background:#f1fdf3}
+    .seo-value.warn{border-color:#ff9800;background:#fffbf0}
+    .seo-len{font-size:11px;margin-left:6px;color:#999}
+    /* Google Preview */
+    .google-preview{background:#fff;border:1px solid #dfe1e5;border-radius:10px;padding:16px 20px;margin-bottom:16px;font-family:Arial,sans-serif}
+    .gp-label{font-size:11px;font-weight:700;text-transform:uppercase;color:#888;margin-bottom:10px;letter-spacing:.4px}
+    .gp-domain{color:#0d652d;font-size:13px;margin-bottom:2px}
+    .gp-title{color:#1a0dab;font-size:20px;font-weight:400;margin-bottom:3px;cursor:pointer}
+    .gp-title:hover{text-decoration:underline}
+    .gp-desc{color:#4d5156;font-size:14px;line-height:1.5}
+    /* Article */
+    .article{background:#fff;border-radius:12px;padding:36px 40px;box-shadow:0 2px 16px rgba(0,0,0,.07)}
+    h1{font-size:2em;color:#1a237e;border-bottom:3px solid #3f51b5;padding-bottom:12px;margin-bottom:20px}
+    h2{font-size:1.45em;color:#283593;margin-top:36px;margin-bottom:8px}
+    h3{font-size:1.15em;color:#3949ab;margin-top:20px;margin-bottom:6px}
+    p{line-height:1.8;margin-bottom:16px}
+    a{color:#1565c0}
+    strong{color:#1a237e}
+    ul,ol{padding-left:24px;margin-bottom:16px}
+    li{margin-bottom:6px}
+    .cta-box{background:#fff3e0;border-radius:8px;padding:16px;font-size:13px;border-left:4px solid #ff9800;margin-top:20px}
+  </style>
+</head>
+<body>
+  <div class="preview-bar">
+    <div><b>👁 Xem trước bài viết ${idx + 1}/${totalSites}</b></div>
+    <div>🌐 ${article.site?.domain || ''}</div>
+    <div>📂 ${article.category?.name || article.category?.id || ''}</div>
+    <div>🤖 ${article.model || ''}</div>
+    <div>🔗 Nguồn: <a href="${session.url}" target="_blank">${session.url.slice(0, 55)}...</a></div>
+  </div>
+
+  ${totalSites > 1 ? `<div class="nav-bar">Các site: ${navLinks}</div>` : ''}
+
+  <!-- SEO Metadata Panel -->
+  <div class="seo-panel">
+    <h3>🔍 SEO Metadata</h3>
+
+    <div class="seo-row">
+      <div class="seo-label">SEO Title</div>
+      <div class="seo-value ${(article.seoTitle||'').length >= 50 && (article.seoTitle||'').length <= 60 ? 'good' : 'warn'}">
+        ${(article.seoTitle || article.title || '—').replace(/</g, '&lt;')}
+        <span class="seo-len">${(article.seoTitle || '').length}/60 ký tự</span>
+      </div>
+    </div>
+
+    <div class="seo-row">
+      <div class="seo-label">Meta Description</div>
+      <div class="seo-value ${(article.metaDescription||'').length >= 140 && (article.metaDescription||'').length <= 160 ? 'good' : 'warn'}">
+        ${(article.metaDescription || '—').replace(/</g, '&lt;')}
+        <span class="seo-len">${(article.metaDescription || '').length}/160 ký tự</span>
+      </div>
+    </div>
+
+    <div class="seo-row">
+      <div class="seo-label">Focus Keyword</div>
+      <div class="seo-value good">${(article.focusKeyword || '—').replace(/</g, '&lt;')}</div>
+    </div>
+
+    <div class="seo-row">
+      <div class="seo-label">Keywords</div>
+      <div class="seo-value">${(article.keywords || '—').replace(/</g, '&lt;')}</div>
+    </div>
+
+    <div class="seo-row">
+      <div class="seo-label">Slug</div>
+      <div class="seo-value good"><code>${article.slug || '—'}</code></div>
+    </div>
+  </div>
+
+  <!-- Google Search Preview -->
+  <div class="google-preview">
+    <div class="gp-label">📌 Google Search Preview</div>
+    <div class="gp-domain">${article.site?.domain?.replace(/^https?:\/\//, '') || 'yoursite.com'} › ${article.slug || '...'}</div>
+    <div class="gp-title">${(article.seoTitle || article.title || 'Tiêu đề SEO').replace(/</g, '&lt;').slice(0, 60)}</div>
+    <div class="gp-desc">${(article.metaDescription || 'Meta description sẽ hiển thị ở đây trên Google.').replace(/</g, '&lt;').slice(0, 160)}</div>
+  </div>
+
+  <!-- Article Content -->
+  <div class="article">
+    ${thumbHtml}
+    ${article.html}
+  </div>
+
+  <div class="cta-box">
+    ✅ Nếu bài ổn, gửi <b>/upbai</b> trong Telegram bot để đăng lên website.<br>
+    ❌ Gửi <b>/cancelbai</b> để hủy và bắt đầu lại.
+  </div>
+</body>
+</html>`);
+});
+
 // ── GET / (Dashboard) ─────────────────────────────────────
 router.get('/', requireAuth, (req, res) => {
-  const cfg = storage.load();
+  const cfg      = storage.load();
   const hasToken = !!cfg.telegram_bot_token;
+  const groqKeys = Array.isArray(cfg.groq_keys) ? cfg.groq_keys : [];
+  const groqActive    = groqKeys.filter(k => !k.exhausted);
+  const groqExhausted = groqKeys.filter(k => k.exhausted);
 
   res.send(html('Dashboard', `
     <div class="topbar">
@@ -417,12 +669,6 @@ router.get('/', requireAuth, (req, res) => {
                     value="${cfg.telegram_chat_id || ''}"
                     placeholder="-100123456789 hoặc @username">
                 </div>
-                <div class="form-group">
-                  <label>Gemini API Key (Dành cho Auto-Chat Bot AI)</label>
-                  <input type="password" name="gemini_api_key" id="f-gemini"
-                    value="${cfg.gemini_api_key || ''}"
-                    placeholder="AIzaSyAxxxxxxxxxxxxxxxx">
-                </div>
               </div>
               <div>
                 <div class="form-group">
@@ -436,6 +682,92 @@ router.get('/', requireAuth, (req, res) => {
             </div>
             <button type="submit" class="btn btn-primary">💾 Lưu cấu hình & Restart bot</button>
           </form>
+        </div>
+      </div>
+
+      <!-- Card: Groq API Keys -->
+      <div class="card" style="margin-top:16px">
+        <div class="card-hd">🤖 Groq API Keys
+          <span class="pill ${groqActive.length > 0 ? 'pill-on' : 'pill-off'}" style="font-size:11px;margin-left:8px">${groqActive.length} active / ${groqKeys.length} total</span>
+        </div>
+        <div class="card-body">
+          <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Dùng cho Auto-Chat Bot AI &amp; SEO Content Writer. Bot tự xoay vòng key khi hết token.</p>
+
+          <!-- ── Model Selector ── -->
+          ${(()=>{
+            const { AVAILABLE_MODELS } = require('./seo-rewriter');
+            const currentModel = cfg.groq_default_model || 'llama-3.3-70b-versatile';
+            const currentBase  = cfg.groq_api_base || 'https://api.groq.com/openai/v1';
+            const modelOpts = AVAILABLE_MODELS.map(m =>
+              `<option value="${m.id}" ${m.id === currentModel ? 'selected' : ''}>${m.label} — ${m.note}</option>`
+            ).join('');
+            return `
+          <div style="background:#111320;border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px">
+            <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:10px">⚙️ Cài đặt Model AI (cho /link command)</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+              <div class="form-group" style="flex:1;min-width:200px;margin:0">
+                <label>Model mặc định</label>
+                <select id="groq-model-select" style="width:100%;background:#0f1117;border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:13px;outline:none">
+                  ${modelOpts}
+                </select>
+              </div>
+              <div class="form-group" style="flex:2;min-width:250px;margin:0">
+                <label>API Base URL <span style="font-weight:400;color:#888">(Groq hoặc OpenRouter)</span></label>
+                <input type="text" id="groq-api-base" value="${currentBase}"
+                  placeholder="https://api.groq.com/openai/v1"
+                  style="width:100%;background:#0f1117;border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:13px;outline:none">
+              </div>
+              <button class="btn btn-blue" onclick="saveGroqSettings()" style="white-space:nowrap">💾 Lưu model</button>
+            </div>
+            <p id="groq-settings-msg" style="margin-top:8px;font-size:12px"></p>
+            <p style="font-size:11px;color:#5a6080;margin-top:8px">
+              💡 <b>Groq native</b> (llama-*): dùng <code style="color:#42a5f5">https://api.groq.com/openai/v1</code> &nbsp;|&nbsp;
+              <b>OpenRouter</b> (openai/*, moonshotai/*): dùng <code style="color:#42a5f5">https://openrouter.ai/api/v1</code>
+            </p>
+          </div>`;
+          })()}
+
+          <!-- ── Active keys ── -->
+          ${groqActive.length === 0
+            ? '<div style="color:var(--muted);font-size:13px;margin-bottom:12px">(Chưa có key nào đang hoạt động)</div>'
+            : groqActive.map((k) => { const idx = groqKeys.indexOf(k); return `
+            <div class="status-row" style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+              <div>
+                <div style="font-weight:700;color:#4caf50">${k.name}</div>
+                <code style="font-size:11px;color:var(--muted)">${k.key.slice(0,8)}••••${k.key.slice(-4)}</code>
+              </div>
+              <div class="actions"><button class="btn btn-primary btn-sm" onclick="removeGroqKey(${idx})">✖ Xóa</button></div>
+            </div>`;}).join('')
+          }
+
+          ${groqExhausted.length > 0 ? `
+          <div style="margin-top:14px">
+            <p style="font-size:12px;color:#ef5350;margin-bottom:8px">⚠️ Keys đã hết token (bị tắt tự động):</p>
+            ${groqExhausted.map((k) => { const idx = groqKeys.indexOf(k); return `
+            <div class="status-row" style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);opacity:0.7">
+              <div>
+                <div style="font-weight:700;color:#ef5350">${k.name} <span style="font-size:10px">(hết token)</span></div>
+                <code style="font-size:11px;color:var(--muted)">${k.key.slice(0,8)}••••${k.key.slice(-4)}</code>
+              </div>
+              <div class="actions">
+                <button class="btn btn-green btn-sm" onclick="resetGroqKey(${idx})">♻️ Reset</button>
+                <button class="btn btn-primary btn-sm" onclick="removeGroqKey(${idx})">✖ Xóa</button>
+              </div>
+            </div>`;}).join('')}
+          </div>` : ''}
+
+          <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+            <div class="form-group" style="flex:0 0 110px;margin:0">
+              <label>Tên key</label>
+              <input type="text" id="new-groq-name" placeholder="API-${groqKeys.length + 1}" style="width:100%">
+            </div>
+            <div class="form-group" style="flex:1;min-width:220px;margin:0">
+              <label>Groq / OpenRouter API Key</label>
+              <input type="password" id="new-groq-key" placeholder="gsk_xxx... hoặc sk-or-xxx..." style="width:100%">
+            </div>
+            <button class="btn btn-green" onclick="addGroqKey()" style="white-space:nowrap">+ Thêm key</button>
+          </div>
+          <p id="groq-add-msg" style="margin-top:8px;font-size:13px"></p>
         </div>
       </div>
 
@@ -667,7 +999,7 @@ router.get('/', requireAuth, (req, res) => {
       const body = {
         telegram_bot_token: fd.get('telegram_bot_token'),
         telegram_chat_id:   fd.get('telegram_chat_id'),
-        gemini_api_key:     fd.get('gemini_api_key'),
+        // gemini_api_key removed — now using Groq
         auto_schedule:      fd.get('auto_schedule') === 'true',
       };
       const r = await fetch('/api/save-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -1000,7 +1332,7 @@ router.get('/', requireAuth, (req, res) => {
     fetchStatus();
     setInterval(fetchStatus, 5000);
     </script>
-  `, '<script src="/site-mgr.js"></script>'));
+  `, '<script src="/site-mgr.js"></script><script src="/groq-mgr.js"></script><script src="/groq-seo-mgr.js"></script>'));
 });
 
 module.exports = router;
