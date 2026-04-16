@@ -138,6 +138,11 @@ async function tryFetchJackpotStatic(game, dateStr) {
 }
 
 async function pollLiveKetquaPlus(game, onLog) {
+    // Đảm bảo liveState[game] luôn được init (kể cả khi gọi thủ công qua UI)
+    if (!liveState[game]) {
+        liveState[game] = { timer: null, lastHash: null, isDoneForToday: false, resetDate: null };
+    }
+
     let apiProduct = game;
     if (game.startsWith('lotto535')) {
         apiProduct = 'lotto535';
