@@ -34,17 +34,31 @@ app.use(ui);
 // ── Health check ─────────────────────────────────────────
 app.get('/health', (_, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
+// ── Helper: resolve PHP proxy URL + Secret ────────────────
+// Ưu tiên legacy fields (php_server_url / php_push_secret);
+// fallback về sites[0] nếu legacy trống (cấu hình qua Dashboard mới)
+function resolveCrawlProxy() {
+  const cfg = storage.load();
+  if (cfg.php_server_url && (cfg.php_push_secret || '').trim()) {
+    return { url: cfg.php_server_url, secret: (cfg.php_push_secret || '').trim() };
+  }
+  const sites = storage.getSites();
+  if (sites.length > 0) {
+    return {
+      url   : sites[0].domain.replace(/\/+$/, '') + '/api/crawl-save.php',
+      secret: sites[0].secret,
+    };
+  }
+  return { url: '', secret: '' };
+}
+
 // ── API: Crawl Vietlott ─────────────────────────────────
 app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
-  const cfg = storage.load();
-  const phpProxyUrl = cfg.php_server_url;
-  const phpSecret   = (cfg.php_push_secret || '').trim();
-
-  // Chọn cách ghi: 100% PHP Proxy
-  const useProxy    = !!(phpProxyUrl && phpSecret);
+  const { url: phpProxyUrl, secret: phpSecret } = resolveCrawlProxy();
+  const useProxy = !!(phpProxyUrl && phpSecret);
 
   if (!useProxy) {
-    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret!' });
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret! Vào Dashboard → thêm site hoặc điền PHP Server URL.' });
   }
 
   logger.log(`[Crawl Vietlott] mode=PHP_PROXY url=${phpProxyUrl || 'N/A'}`);
@@ -92,12 +106,10 @@ app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
 
 // ── API: Kiểm tra dữ liệu thiếu trong DB ──────────────────
 app.get('/api/check-missing', ui.requireAuth, async (req, res) => {
-  const cfg         = storage.load();
-  const phpProxyUrl = cfg.php_server_url;
-  const phpSecret   = (cfg.php_push_secret || '').trim();
+  const { url: phpProxyUrl, secret: phpSecret } = resolveCrawlProxy();
 
   if (!phpProxyUrl || !phpSecret) {
-    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret!' });
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret! Vào Dashboard → thêm site hoặc điền PHP Server URL.' });
   }
 
   const { type = 'vietlott', games = '', regions = '', from, to } = req.query;
@@ -125,11 +137,9 @@ app.get('/api/check-missing', ui.requireAuth, async (req, res) => {
 
 // ── API: Kiểm tra số thiếu trong record đã có trong DB ───────────────
 app.get('/api/check-incomplete', ui.requireAuth, async (req, res) => {
-  const cfg         = storage.load();
-  const phpProxyUrl = cfg.php_server_url;
-  const phpSecret   = (cfg.php_push_secret || '').trim();
+  const { url: phpProxyUrl, secret: phpSecret } = resolveCrawlProxy();
   if (!phpProxyUrl || !phpSecret)
-    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret!' });
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret! Vào Dashboard → thêm site hoặc điền PHP Server URL.' });
 
   const { games = '', from, to } = req.query;
   if (!from || !to) return res.status(400).json({ ok: false, msg: 'Thiếu from / to' });
@@ -151,14 +161,11 @@ app.get('/api/check-incomplete', ui.requireAuth, async (req, res) => {
 
 // ── API: Crawl 3 Miền (XSMB, XSMN, XSMT) ─────────────────
 app.post('/api/crawler/mien', ui.requireAuth, async (req, res) => {
-  const cfg = storage.load();
-  const phpProxyUrl = cfg.php_server_url;
-  const phpSecret   = (cfg.php_push_secret || '').trim();
-
+  const { url: phpProxyUrl, secret: phpSecret } = resolveCrawlProxy();
   const useProxy = !!(phpProxyUrl && phpSecret);
 
   if (!useProxy) {
-    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret!' });
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret! Vào Dashboard → thêm site hoặc điền PHP Server URL.' });
   }
 
   logger.log(`[Crawl 3 Miền] mode=PHP_PROXY url=${phpProxyUrl || 'N/A'}`);
