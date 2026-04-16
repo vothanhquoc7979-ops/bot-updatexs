@@ -37,6 +37,16 @@ async function start() {
     }
   }
 
+  // ── Bot message template helper ───────────────────────────────────────────
+  function getBotMsg(key, def) {
+    const cfg = storage.load();
+    const val = cfg.bot_messages ? cfg.bot_messages[key] : '';
+    return (val && val.trim()) ? val.trim() : def;
+  }
+  function fillTpl(tpl, vars) {
+    return tpl.replace(/\{(\w+)\}/g, (_, k) => vars[k] !== undefined ? vars[k] : _);
+  }
+
   function formatResults(results) {
     if (!results || results.length === 0) return 'Chưa có dữ liệu.';
     return results.map(r => {
@@ -54,8 +64,10 @@ async function start() {
     }).join('\n\n');
   }
 
-  bot.command('start', ctx => ctx.reply(
-    '🎰 <b>KQXS Live Bot</b>\n\n' +
+  bot.command('start', ctx => {
+    const startHeader = getBotMsg('cmd_start_header', '🎰 <b>KQXS Live Bot</b>');
+    return ctx.reply(
+    startHeader + '\n\n' +
     '📊 <b>Crawl &amp; Xổ số:</b>\n' +
     '/chay mb|mn|mt|all — Poll KQXS\n' +
     '/dung [mb|mn|mt] — Dừng poll\n' +
@@ -73,8 +85,9 @@ async function start() {
     '/setmodel [số] — Đổi model AI\n' +
     '/keys — Kiểm tra trạng thái Groq keys\n' +
     '/resetgroq — Reset tất cả exhausted keys',
-    { parse_mode: 'HTML' }
-  ));
+        { parse_mode: 'HTML' }
+    );
+  });
 
   // ── /model — Xem danh sách model AI ─────────────────────────────────────
   bot.command('model', ctx => {
@@ -129,15 +142,16 @@ async function start() {
     const cfg  = storage.load();
     const keys = Array.isArray(cfg.groq_keys) ? cfg.groq_keys : [];
     if (keys.length === 0) {
-      return ctx.reply('❌ Chưa có Groq API key nào!\n\n👉 Vào Dashboard → mục Groq Keys để thêm key.');
+      return ctx.reply(getBotMsg('cmd_keys_empty', '❌ Chưa có Groq API key nào!\n\n👉 Vào Dashboard → mục Groq Keys để thêm key.'));
     }
     const list = keys.map((k, i) => {
       const icon = k.exhausted ? '🔴 [HẾT TOKEN]' : '🟢 [OK]';
       return `${i + 1}. ${icon} <b>${k.name}</b>\n   <code>${k.key.slice(0, 8)}...${k.key.slice(-4)}</code>`;
     }).join('\n\n');
     const exhaustedCount = keys.filter(k => k.exhausted).length;
+    const keysHeader = getBotMsg('cmd_keys_header', '🔑 <b>Groq API Keys</b>');
     ctx.reply(
-      `🔑 <b>Groq API Keys (${keys.length} keys)</b>\n\n${list}\n\n` +
+      `${keysHeader} (${keys.length} keys)\n\n${list}\n\n` +
       (exhaustedCount > 0
         ? `⚠️ ${exhaustedCount} key đang bị khóa (exhausted)\n👉 Gõ <code>/resetgroq</code> để reset`
         : '✅ Tất cả keys đều hoạt động'),
@@ -150,7 +164,7 @@ async function start() {
     const cfg  = storage.load();
     const keys = Array.isArray(cfg.groq_keys) ? cfg.groq_keys : [];
     if (keys.length === 0) {
-      return ctx.reply('❌ Chưa có Groq API key nào để reset.\n👉 Vào Dashboard để thêm key.');
+      return ctx.reply(getBotMsg('cmd_resetgroq_empty', '❌ Chưa có Groq API key nào để reset.\n👉 Vào Dashboard để thêm key.'));
     }
     const resetCount = keys.filter(k => k.exhausted).length;
     const resetKeys  = keys.map(k => ({ ...k, exhausted: false }));
@@ -158,8 +172,8 @@ async function start() {
     logger.log(`[resetgroq] Reset ${resetCount} exhausted keys`);
     ctx.reply(
       resetCount > 0
-        ? `✅ <b>Đã reset ${resetCount} key!</b>\n\nTất cả keys đã sẵn sàng. Thử <code>/link [url]</code> lại nhé.`
-        : `ℹ️ Không có key nào cần reset. Tất cả keys đều đang hoạt động.`,
+        ? fillTpl(getBotMsg('cmd_resetgroq_ok', '✅ <b>Đã reset {count} key!</b>\n\nTất cả keys đã sẵn sàng. Thử <code>/link [url]</code> lại nhé.'), { count: resetCount })
+        : getBotMsg('cmd_resetgroq_none', 'ℹ️ Không có key nào cần reset. Tất cả keys đều đang hoạt động.'),
       { parse_mode: 'HTML' }
     );
   });
@@ -497,7 +511,7 @@ async function start() {
   // ── /cancelbai ────────────────────────────────────────────────────────────
   bot.command('cancelbai', ctx => {
     sessionStore.clearSession(ctx.from.id);
-    ctx.reply('🗑️ Đã hủy phiên làm việc hiện tại.\nDùng /link [url] để bắt đầu mới.');
+    ctx.reply(getBotMsg('cmd_cancelbai', '🗑️ Đã hủy phiên làm việc hiện tại.\nDùng /link [url] để bắt đầu mới.'), { parse_mode: 'HTML' });
   });
 
   // ── Text handler: số cho site/category selection ──────────────────────────
@@ -540,19 +554,19 @@ async function start() {
     const arg = ctx.message.text.split(' ')[1]?.toLowerCase() || '';
     if (arg === 'all') {
       ['mn', 'mt', 'mb'].forEach(r => schedStart(r, tgLog, true));
-      return ctx.reply('🚀 Đã bắt đầu poll cả 3 miền!');
+      return ctx.reply(getBotMsg('cmd_chay_all', '🚀 Đã bắt đầu poll cả 3 miền!'), { parse_mode: 'HTML' });
     }
     if (!['mb','mn','mt'].includes(arg)) return ctx.reply('❌ Dùng: /chay mb | mn | mt | all');
     schedStart(arg, tgLog, true);
-    ctx.reply(`🚀 Bắt đầu poll ${REGION_NAMES[arg]}...`);
+    ctx.reply(fillTpl(getBotMsg('cmd_chay_region', '🚀 Bắt đầu poll {region_name}...'), { region_name: REGION_NAMES[arg] }), { parse_mode: 'HTML' });
   });
 
   bot.command('dung', ctx => {
     const arg = ctx.message.text.split(' ')[1]?.toLowerCase() || '';
-    if (!arg || arg === 'all') { stopAll(tgLog); return ctx.reply('⏹ Đã dừng tất cả.'); }
+    if (!arg || arg === 'all') { stopAll(tgLog); return ctx.reply(getBotMsg('cmd_dung_all', '⏹ Đã dừng tất cả.'), { parse_mode: 'HTML' }); }
     if (!['mb','mn','mt'].includes(arg)) return ctx.reply('❌ Dùng: /dung | /dung mb|mn|mt');
     schedStop(arg, tgLog);
-    ctx.reply(`⏹ Đã dừng ${REGION_NAMES[arg]}`);
+    ctx.reply(fillTpl(getBotMsg('cmd_dung_region', '⏹ Đã dừng {region_name}'), { region_name: REGION_NAMES[arg] }), { parse_mode: 'HTML' });
   });
 
   bot.command('xem', ctx => {
@@ -560,18 +574,19 @@ async function start() {
     if (!['mb','mn','mt'].includes(arg)) return ctx.reply('❌ Dùng: /xem mb | mn | mt');
     const data = getCurrentData(arg);
     if (!data) return ctx.reply(`ℹ️ Chưa có dữ liệu. Dùng /chay ${arg} trước.`);
-    ctx.reply(`📊 <b>KQ ${REGION_NAMES[arg]}</b>\n\n` + formatResults(data), { parse_mode: 'HTML' });
+    const xHeader = fillTpl(getBotMsg('cmd_xem_header', '📊 <b>KQ {region_name}</b>'), { region_name: REGION_NAMES[arg] });
+    ctx.reply(xHeader + '\n\n' + formatResults(data), { parse_mode: 'HTML' });
   });
 
   bot.command('status', ctx => {
-    ctx.reply('📊 <b>Trạng thái:</b>\n\n' + getStatus(), { parse_mode: 'HTML' });
+    ctx.reply(getBotMsg('cmd_status_header', '📊 <b>Trạng thái:</b>') + '\n\n' + getStatus(), { parse_mode: 'HTML' });
   });
 
   bot.command('lichxo', ctx => {
     ctx.reply(
-      '📅 <b>Lịch xổ hôm nay</b>\n\n' +
-      '🟢 Miền Nam / Miền Trung: 16:00 – 17:30\n' +
-      '🔴 Miền Bắc: 18:30 – 19:15',
+      getBotMsg('cmd_lichxo',
+        '📅 <b>Lịch xổ hôm nay</b>\n\n🟢 Miền Nam / Miền Trung: 16:00 – 17:30\n🔴 Miền Bắc: 18:30 – 19:15'
+      ),
       { parse_mode: 'HTML' }
     );
   });
