@@ -15,6 +15,43 @@ const AVAILABLE_MODELS = [
   { id: 'moonshotai/kimi-k2-instruct', label: '🌙 Kimi K2 Instruct',      note: 'Sáng tạo • OpenRouter' },
 ];
 
+// ── Danh sách internal links thật của site ────────────────────────────────────
+// AI chọn 4-6 links phù hợp chủ đề và dùng CHÍNH XÁC URL + anchor text này
+const INTERNAL_LINKS = [
+  { url: '/xsmb',                anchor: 'kết quả xổ số miền Bắc hôm nay' },
+  { url: '/xsmn',                anchor: 'kết quả xổ số miền Nam hôm nay' },
+  { url: '/xsmt',                anchor: 'kết quả xổ số miền Trung hôm nay' },
+  { url: '/vietlott',            anchor: 'kết quả Vietlott hôm nay' },
+  { url: '/quay-thu',            anchor: 'quay thử xổ số trực tuyến' },
+  { url: '/ket-qua',             anchor: 'kết quả xổ số tổng hợp' },
+  { url: '/soi-cau',             anchor: 'soi cầu lô đề hôm nay' },
+  { url: '/du-doan',             anchor: 'dự đoán xổ số miễn phí' },
+  { url: '/du-doan/xsmb',        anchor: 'dự đoán XSMB hôm nay' },
+  { url: '/du-doan/xsmn',        anchor: 'dự đoán XSMN hôm nay' },
+  { url: '/du-doan/xsmt',        anchor: 'dự đoán XSMT hôm nay' },
+  { url: '/thong-ke-dac-biet',   anchor: 'thống kê giải đặc biệt' },
+  { url: '/lo-gan',              anchor: 'lô gan hôm nay' },
+  { url: '/tan-suat-loto',       anchor: 'tần suất xuất hiện cặp lô' },
+  { url: '/dau-duoi-dac-biet',   anchor: 'đầu đuôi giải đặc biệt' },
+  { url: '/so-mo',               anchor: 'sổ mơ giải mã giấc mơ đánh đề' },
+  { url: '/tin-tuc',             anchor: 'tin tức xổ số mới nhất' },
+  { url: '/xsmb-30-ngay',        anchor: 'kết quả XSMB 30 ngày gần nhất' },
+  { url: '/xsmb-100-ngay',       anchor: 'kết quả XSMB 100 ngày gần nhất' },
+  { url: '/xsmb-200-ngay',       anchor: 'kết quả XSMB 200 ngày gần nhất' },
+  { url: '/xsmn-30-ngay',        anchor: 'kết quả XSMN 30 ngày gần nhất' },
+  { url: '/xsmn-100-ngay',       anchor: 'kết quả XSMN 100 ngày gần nhất' },
+  { url: '/xsmn-200-ngay',       anchor: 'kết quả XSMN 200 ngày gần nhất' },
+  { url: '/xsmt-30-ngay',        anchor: 'kết quả XSMT 30 ngày gần nhất' },
+  { url: '/xsmt-100-ngay',       anchor: 'kết quả XSMT 100 ngày gần nhất' },
+  { url: '/xsmt-200-ngay',       anchor: 'kết quả XSMT 200 ngày gần nhất' },
+  { url: '/vietlott/mega645',    anchor: 'xổ số Mega 6/45' },
+  { url: '/vietlott/power655',   anchor: 'xổ số Power 6/55' },
+  { url: '/vietlott/lotto13h',   anchor: 'xổ số Lotto 13h hôm nay' },
+  { url: '/vietlott/lotto21h',   anchor: 'xổ số Lotto 21h hôm nay' },
+  { url: '/vietlott/max3d',      anchor: 'kết quả xổ số Max 3D hôm nay' },
+  { url: '/vietlott/max3dpro',   anchor: 'kết quả xổ số Max 3D Pro hôm nay' },
+];
+
 // ── Fetch HTML từ URL ────────────────────────────────────────────────────────
 async function fetchPageContent(url) {
   const ctrl  = new AbortController();
@@ -113,8 +150,9 @@ async function callAI(apiKey, model, systemPrompt, userPrompt, apiBase) {
     headers: {
       'Content-Type' : 'application/json',
       'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer' : 'https://xoso-bot.railway.app',
-      'X-Title'      : 'KQXS SEO Bot',
+      // OpenRouter: dùng để tracking dashboard (không bắt buộc, Groq bỏ qua)
+      'HTTP-Referer' : process.env.BOT_PUBLIC_URL || 'https://xoso-bot.railway.app',
+      'X-Title'      : process.env.SITE_NAME      || 'KQXS SEO Bot',
     },
     body,
   });
@@ -190,11 +228,19 @@ QUY TẮC TỪNG TRƯỜNG:
    - Mỗi <h2> có 1-2 thẻ <h3> khi cần đi sâu chi tiết
    - Mỗi đoạn <p> dài 80-150 từ, tự nhiên, hấp dẫn
    - Intro: 100-130 từ, có từ khóa chính, mô tả rõ bài về gì
-   - 3-5 anchor text nội bộ: <a href="/slug">anchor text tự nhiên</a>
    - Kết bài có CTA rõ ràng, hướng dẫn hành động
    - TỐI THIỂU 1500 từ (bắt buộc — nếu thiếu sẽ bị từ chối)
    - CHỈ dùng thẻ: <p> <h1> <h2> <h3> <a> <strong> <ul> <ol> <li>
    - KHÔNG dùng: <div> <span> <section> <article> markdown (#, **)
+
+   📎 ANCHOR TEXT NỘI BỘ — bắt buộc gắn 4-6 link trong bài:
+   Chỉ được dùng CÁC URL SAU (chọn những link phù hợp nhất với chủ đề bài):
+${INTERNAL_LINKS.map(l => `   → <a href="${l.url}">${l.anchor}</a>`).join('\n')}
+
+   QUY TẮC anchor text:
+   - Gắn tự nhiên vào giữa đoạn văn (KHÔNG liệt kê lộ liễu)
+   - Dùng CHÍNH XÁC URL và anchor text từ danh sách trên, không được đổi
+   - Phân bố rải rác khắp bài, không dồn cụm
 
 ⚠️ QUAN TRỌNG: Chỉ trả về JSON thuần, BẮT ĐẦU bằng { và KẾT THÚC bằng }.
 KHÔNG có \`\`\`json, KHÔNG có giải thích, KHÔNG có text ngoài JSON.
@@ -287,4 +333,5 @@ async function rewriteArticleSEO(pageData, overrideModel) {
   throw lastError || new Error('Tất cả API keys đã hết token');
 }
 
-module.exports = { fetchPageContent, rewriteArticleSEO, AVAILABLE_MODELS };
+module.exports = { fetchPageContent, rewriteArticleSEO, AVAILABLE_MODELS, INTERNAL_LINKS };
+
