@@ -89,6 +89,16 @@ ${extraHead}
   .login-card h2{font-size:24px;margin-bottom:4px}
   .login-card p{color:var(--muted);margin-bottom:24px;font-size:13px}
   .logo{font-size:44px;margin-bottom:16px}
+  /* Bot message editor */
+  .msg-editor{width:100%;background:#080b14;border:1px solid var(--border);border-radius:8px;padding:12px;color:#e8e8f0;font-family:'Cascadia Code',Consolas,monospace;font-size:12.5px;line-height:1.7;resize:vertical;outline:none;min-height:80px;transition:border-color .2s}
+  .msg-editor:focus{border-color:var(--accent2)}
+  .msg-section{background:#111320;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px}
+  .msg-section-hd{padding:10px 16px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;background:#0d1020}
+  .msg-section-body{padding:14px 16px}
+  .var-chip{display:inline-block;background:#1a2038;border:1px solid #2a3050;border-radius:4px;padding:1px 7px;font-family:monospace;font-size:11px;color:#7bc8f6;cursor:pointer;margin:2px;transition:background .15s}
+  .var-chip:hover{background:#2a3555}
+  .tgemoji-hint{font-size:11px;color:#5a6080;margin-top:6px}
+  .tgemoji-hint code{color:#42a5f5;background:#111830;padding:1px 5px;border-radius:3px;font-size:11px}
 </style>
 </head>
 <body>
@@ -194,6 +204,22 @@ router.post('/api/save-config', requireAuth, express.json(), async (req, res) =>
     logger.log('✅ Đã lưu cấu hình mới. Restarting bot...');
     const botManager = require('./bot-manager');
     await botManager.restart();
+    res.json({ ok: true });
+  } catch (e) {
+    res.json({ ok: false, msg: e.message });
+  }
+});
+// ── POST /api/save-bot-messages ───────────────────────────────
+router.post('/api/save-bot-messages', requireAuth, express.json(), (req, res) => {
+  try {
+    const allowed = ['completion_header','pending_header','vietlott_header','all_done',
+                     'push_ok','push_fail','start_msg','schedule_start'];
+    const msgs = {};
+    for (const k of allowed) {
+      if (req.body[k] !== undefined) msgs[k] = String(req.body[k]);
+    }
+    storage.save({ bot_messages: msgs });
+    logger.log('✅ Đã lưu nội dung bot messages');
     res.json({ ok: true });
   } catch (e) {
     res.json({ ok: false, msg: e.message });
@@ -567,6 +593,7 @@ router.get('/', requireAuth, (req, res) => {
       <!-- Tab navigation -->
       <div style="display:flex;gap:0;margin-bottom:20px;border-bottom:2px solid var(--border)">
         <button class="tab-btn active" id="tab-dashboard" onclick="showTab('dashboard')">📊 Dashboard</button>
+        <button class="tab-btn" id="tab-botmsg" onclick="showTab('botmsg')">📝 Nội dung Bot</button>
         <button class="tab-btn" id="tab-crawl" onclick="showTab('crawl')">🕷️ Crawl Vietlott</button>
       </div>
 
@@ -822,6 +849,86 @@ router.get('/', requireAuth, (req, res) => {
 
       </div><!-- /panel-dashboard -->
 
+      <!-- ═══════════════ TAB: NỘI DUNG BOT ═══════════════ -->
+      <div id="panel-botmsg" style="display:none">
+        <div id="flash-botmsg" style="display:none" class="alert alert-ok"></div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-hd">🎨 Hướng dẫn: Chèn Custom Emoji Telegram</div>
+          <div class="card-body" style="font-size:13px;line-height:1.8">
+            <p>Dán trực tiếp thẻ emoji vào bất kỳ vị trí nào trong nội dung:</p>
+            <code style="display:block;background:#080b14;padding:10px 14px;border-radius:8px;color:#42a5f5;font-size:12px;margin:10px 0">&lt;tg-emoji emoji-id="5447644880824181073"&gt;&lt;/tg-emoji&gt;</code>
+            <p style="color:var(--muted)">Click vào chip bên dưới để chèn biến vào vị trí con trỏ trong textarea:</p>
+            <div style="margin-top:8px;line-height:2.2">
+              <span class="var-chip" onclick="insertVar('{region_done}')">{region_done}</span> — Tên miền xổ xong&nbsp;&nbsp;
+              <span class="var-chip" onclick="insertVar('{provinces_done}')">{provinces_done}</span> — Danh sách tỉnh đã xong
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-hd">📨 Tập hợp nội dung thông báo Bot</div>
+          <div class="card-body">
+            <!-- 1. Thông báo xổ xong -->
+            <div class="msg-section">
+              <div class="msg-section-hd">✅ Thông báo Xổ Xong (khi 1 miền hoàn thành)</div>
+              <div class="msg-section-body">
+                <div class="form-group" style="margin-bottom:10px">
+                  <label>Dòng tiêu đề <span style="color:var(--muted);font-weight:400;text-transform:none">(hỗ trợ {region_done})</span></label>
+                  <textarea id="bm-completion-header" class="msg-editor" rows="2">${(cfg.bot_messages?.completion_header || '✅ <b>Xổ Số {region_done}</b> đã cập nhật trực tiếp và đầy đủ Full số thành công!').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                </div>
+                <div class="form-group" style="margin-bottom:10px">
+                  <label>Dòng đầu phần "Còn đợi"</label>
+                  <textarea id="bm-pending-header" class="msg-editor" rows="2">${(cfg.bot_messages?.pending_header || '⏳ <b>Các hàng còn đợi:</b>').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                </div>
+                <div class="form-group" style="margin-bottom:10px">
+                  <label>Dòng đầu phần Vietlott</label>
+                  <textarea id="bm-vietlott-header" class="msg-editor" rows="2">${(cfg.bot_messages?.vietlott_header || '🎰 <b>Vietlott</b> (18:00 - 18:30)').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                </div>
+                <div class="form-group" style="margin-bottom:0">
+                  <label>Khi tất cả đã xong hết</label>
+                  <textarea id="bm-all-done" class="msg-editor" rows="2">${(cfg.bot_messages?.all_done || '🏆 Tất cả cuộc xổ hôm nay đã hoàn thành!').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                </div>
+                <div class="tgemoji-hint">💡 Hỗ trợ HTML: <code>&lt;b&gt;</code> <code>&lt;i&gt;</code> <code>&lt;code&gt;</code> <code>&lt;tg-emoji emoji-id="..."&gt;&lt;/tg-emoji&gt;</code></div>
+              </div>
+            </div>
+            <!-- 2. Push thất bại -->
+            <div class="msg-section">
+              <div class="msg-section-hd">⚠️ Thông báo Push Thất Bại</div>
+              <div class="msg-section-body">
+                <div class="form-group" style="margin-bottom:0">
+                  <label>Template <span style="color:var(--muted);font-weight:400;text-transform:none">(dùng {site_domain}, {error_reason})</span></label>
+                  <textarea id="bm-push-fail" class="msg-editor" rows="2">${(cfg.bot_messages?.push_fail || '⚠️ Push thất bại đến <b>{site_domain}</b>\n❌ {error_reason}').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                </div>
+              </div>
+            </div>
+            <!-- 3. Lệnh /start -->
+            <div class="msg-section">
+              <div class="msg-section-hd">🚀 Lệnh /start (tùy chỉnh, để trống = dùng mặc định)</div>
+              <div class="msg-section-body">
+                <div class="form-group" style="margin-bottom:0">
+                  <textarea id="bm-start-msg" class="msg-editor" rows="5" placeholder="Để trống = dùng message mặc định đã lập trình...">${(cfg.bot_messages?.start_msg || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                </div>
+                <div class="tgemoji-hint">💡 Để trống thì bot dùng nội dung /start mặc định</div>
+              </div>
+            </div>
+            <!-- 4. Auto-schedule -->
+            <div class="msg-section">
+              <div class="msg-section-hd">🕒 Auto-Schedule bắt đầu (để trống = không thông báo)</div>
+              <div class="msg-section-body">
+                <div class="form-group" style="margin-bottom:0">
+                  <label><span style="color:var(--muted);font-weight:400;text-transform:none">Dùng {region_name}: tên miền đang bật</span></label>
+                  <textarea id="bm-schedule-start" class="msg-editor" rows="2" placeholder="Để trống = không gửi thông báo khi auto-schedule bắt đầu...">${(cfg.bot_messages?.schedule_start || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:16px;align-items:center">
+              <button class="btn btn-primary" onclick="saveBotMessages()">💾 Lưu nội dung</button>
+              <button class="btn btn-gray" onclick="resetBotMessages()">↩️ Về mặc định</button>
+              <span id="botmsg-save-msg" style="font-size:13px;margin-left:4px"></span>
+            </div>
+          </div>
+        </div>
+      </div><!-- /panel-botmsg -->
+
       <!-- ═══════════════ TAB: CRAWL DỮ LIỆU ═══════════════ -->
       <div id="panel-crawl" style="display:none">
 
@@ -911,11 +1018,10 @@ router.get('/', requireAuth, (req, res) => {
 
     // ── Tab switching ─────────────────────────────────────
     function showTab(name) {
-      document.getElementById('panel-dashboard').style.display = name === 'dashboard' ? '' : 'none';
-      document.getElementById('panel-crawl').style.display     = name === 'crawl'     ? '' : 'none';
-      document.getElementById('tab-dashboard').className = 'tab-btn' + (name === 'dashboard' ? ' active' : '');
-      document.getElementById('tab-crawl').className     = 'tab-btn' + (name === 'crawl'     ? ' active' : '');
-      // none navigator
+      ['dashboard','botmsg','crawl'].forEach(function(t) {
+        document.getElementById('panel-' + t).style.display = t === name ? '' : 'none';
+        document.getElementById('tab-' + t).className = 'tab-btn' + (t === name ? ' active' : '');
+      });
     }
 
     // Đã bỏ Javascript checkMySQLStatus và testMysql
@@ -1331,6 +1437,57 @@ router.get('/', requireAuth, (req, res) => {
     // ── Start polling ────────────────────────────────────
     fetchStatus();
     setInterval(fetchStatus, 5000);
+
+    // ══ Bot Messages Editor ══════════════════════════════
+    var _lastTA = null;
+    document.addEventListener('focusin', function(e) {
+      if (e.target && e.target.classList.contains('msg-editor')) _lastTA = e.target;
+    });
+    function insertVar(text) {
+      var ta = _lastTA;
+      if (!ta) { alert('Hãy click vào textarea trước!'); return; }
+      var s = ta.selectionStart, e2 = ta.selectionEnd;
+      ta.value = ta.value.slice(0, s) + text + ta.value.slice(e2);
+      ta.selectionStart = ta.selectionEnd = s + text.length;
+      ta.focus();
+    }
+    function deentify(str) {
+      return str.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+    }
+    async function saveBotMessages() {
+      var fields = [
+        ['completion-header','completion_header'],
+        ['pending-header','pending_header'],
+        ['vietlott-header','vietlott_header'],
+        ['all-done','all_done'],
+        ['push-fail','push_fail'],
+        ['start-msg','start_msg'],
+        ['schedule-start','schedule_start'],
+      ];
+      var data = {};
+      fields.forEach(function(f) {
+        var el = document.getElementById('bm-' + f[0]);
+        if (el) data[f[1]] = deentify(el.value);
+      });
+      var p = document.getElementById('botmsg-save-msg');
+      p.textContent = '⏳ Đang lưu...'; p.style.color='#888';
+      try {
+        var r = await fetch('/api/save-bot-messages', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+        var d = await r.json();
+        if (d.ok) { p.textContent = '✅ Đã lưu!'; p.style.color='#4caf50'; }
+        else      { p.textContent = '❌ ' + (d.msg||'Lỗi'); p.style.color='#ef5350'; }
+      } catch(e) { p.textContent = '❌ ' + e.message; p.style.color='#ef5350'; }
+    }
+    function resetBotMessages() {
+      if (!confirm('Đặt về nội dung mặc định?')) return;
+      document.getElementById('bm-completion-header').value = '\u2705 <b>X\u1ed5 S\u1ed1 {region_done}</b> \u0111\u00e3 c\u1eadp nh\u1eadt tr\u1ef1c ti\u1ebfp v\u00e0 \u0111\u1ea7y \u0111\u1ee7 Full s\u1ed1 th\u00e0nh c\u00f4ng!';
+      document.getElementById('bm-pending-header').value   = '\u23f3 <b>C\u00e1c h\u00e0ng c\u00f2n \u0111\u1ee3i:</b>';
+      document.getElementById('bm-vietlott-header').value  = '\ud83c\udfb0 <b>Vietlott</b> (18:00 - 18:30)';
+      document.getElementById('bm-all-done').value         = '\ud83c\udfc6 T\u1ea5t c\u1ea3 cu\u1ed9c x\u1ed5 h\u00f4m nay \u0111\u00e3 ho\u00e0n th\u00e0nh!';
+      document.getElementById('bm-push-fail').value        = '\u26a0\ufe0f Push th\u1ea5t b\u1ea1i \u0111\u1ebfn <b>{site_domain}</b>\n\u274c {error_reason}';
+      document.getElementById('bm-start-msg').value        = '';
+      document.getElementById('bm-schedule-start').value   = '';
+    }
     </script>
   `, '<script src="/site-mgr.js"></script><script src="/groq-mgr.js"></script><script src="/groq-seo-mgr.js"></script>'));
 });

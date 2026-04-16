@@ -173,17 +173,26 @@ function stopAll(onLog) {
 
 // ─── Build thông báo Telegram khi 1 miền hoàn thành ───────
 function buildCompletionNotice(doneRegion, results) {
-  const tz   = 'Asia/Ho_Chi_Minh';
-  const now  = new Date();
-  const dow  = Number(now.toLocaleString('en-US', { timeZone: tz, weekday: 'narrow' })
-                      .replace(/[^0-9]/g, '')) || 0;
-  // Tính weekday index (0=CN) từ toLocaleDateString
+  const tz     = 'Asia/Ho_Chi_Minh';
+  const now    = new Date();
   const dowIdx = new Date(now.toLocaleDateString('sv-SE', { timeZone: tz })).getDay();
+
+  // Lấy template từ storage (nếu admin đã tùy chỉnh)
+  const storage = require('./storage');
+  const cfg     = storage.load();
+  const tpl     = cfg.bot_messages || {};
+
+  const T = {
+    completion_header: tpl.completion_header || '✅ <b>Xổ Số {region_done}</b> đã cập nhật trực tiếp và đầy đủ Full số thành công!',
+    pending_header   : tpl.pending_header    || '⏳ <b>Các hàng còn đợi:</b>',
+    vietlott_header  : tpl.vietlott_header   || '🎰 <b>Vietlott</b> (18:00 - 18:30)',
+    all_done         : tpl.all_done          || '🏆 Tất cả cuộc xổ hôm nay đã hoàn thành!',
+  };
 
   // --- Phần đã xong ---
   const doneProvinces = results.map(r => `  • ${r.province}`).join('\n');
-  let msg = `✅ <b>Xổ Số ${REGION_NAMES[doneRegion]}</b> đã cập nhật trực tiếp và đầy đủ Full số!\n`;
-  msg += doneProvinces + '\n';
+  let msg  = T.completion_header.replace('{region_done}', REGION_NAMES[doneRegion]) + '\n';
+  msg     += doneProvinces + '\n';
 
   // --- Các miền còn chờ ---
   const pendingRegions = [];
@@ -201,18 +210,18 @@ function buildCompletionNotice(doneRegion, results) {
   }
 
   if (pendingRegions.length > 0 || pendingVietlott.length > 0) {
-    msg += '\n⏳ <b>Các hàng còn đợi:</b>\n';
+    msg += '\n' + T.pending_header + '\n';
     for (const pr of pendingRegions) {
       const icon = pr.running ? '🔴' : '⏳';
       msg += `\n${icon} <b>Xổ Số ${REGION_NAMES[pr.region]}</b>\n`;
       msg += pr.provinces.map(p => `  • ${p}`).join('\n') + '\n';
     }
     if (pendingVietlott.length > 0) {
-      msg += `\n🎰 <b>Vietlott</b> (18:00 - 18:30)\n`;
+      msg += '\n' + T.vietlott_header + '\n';
       msg += pendingVietlott.map(g => `  • ${g}`).join('\n') + '\n';
     }
   } else {
-    msg += '\n🏆 Tất cả cuộc xổ hôm nay đã hoàn thành!';
+    msg += '\n' + T.all_done;
   }
   return msg.trim();
 }
