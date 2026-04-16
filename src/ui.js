@@ -928,6 +928,17 @@ router.get('/', requireAuth, (req, res) => {
           </div>
         </div>
       </div><!-- /panel-botmsg -->
+      <script type="application/json" id="bot-dfl">${
+        JSON.stringify({
+          completion_header: '\u2705 <b>X\u1ed5 S\u1ed1 {region_done}</b> \u0111\u00e3 c\u1eadp nh\u1eadt tr\u1ef1c ti\u1ebfp v\u00e0 \u0111\u1ea7y \u0111\u1ee7 Full s\u1ed1 th\u00e0nh c\u00f4ng!',
+          pending_header   : '\u23f3 <b>C\u00e1c h\u00e0ng c\u00f2n \u0111\u1ee3i:</b>',
+          vietlott_header  : '\ud83c\udfb0 <b>Vietlott</b> (18:00 - 18:30)',
+          all_done         : '\ud83c\udfc6 T\u1ea5t c\u1ea3 cu\u1ed9c x\u1ed5 h\u00f4m nay \u0111\u00e3 ho\u00e0n th\u00e0nh!',
+          push_fail        : '\u26a0\ufe0f Push th\u1ea5t b\u1ea1i \u0111\u1ebfn <b>{site_domain}</b>\n\u274c {error_reason}',
+          start_msg        : '',
+          schedule_start   : '',
+        }).replace(/</g,'\\u003c').replace(/>/g,'\\u003e')
+      }</script>
 
       <!-- ═══════════════ TAB: CRAWL DỮ LIỆU ═══════════════ -->
       <div id="panel-crawl" style="display:none">
@@ -1479,14 +1490,23 @@ router.get('/', requireAuth, (req, res) => {
       } catch(e) { p.textContent = '❌ ' + e.message; p.style.color='#ef5350'; }
     }
     function resetBotMessages() {
-      if (!confirm('Đặt về nội dung mặc định?')) return;
-      document.getElementById('bm-completion-header').value = '\u2705 <b>X\u1ed5 S\u1ed1 {region_done}</b> \u0111\u00e3 c\u1eadp nh\u1eadt tr\u1ef1c ti\u1ebfp v\u00e0 \u0111\u1ea7y \u0111\u1ee7 Full s\u1ed1 th\u00e0nh c\u00f4ng!';
-      document.getElementById('bm-pending-header').value   = '\u23f3 <b>C\u00e1c h\u00e0ng c\u00f2n \u0111\u1ee3i:</b>';
-      document.getElementById('bm-vietlott-header').value  = '\ud83c\udfb0 <b>Vietlott</b> (18:00 - 18:30)';
-      document.getElementById('bm-all-done').value         = '\ud83c\udfc6 T\u1ea5t c\u1ea3 cu\u1ed9c x\u1ed5 h\u00f4m nay \u0111\u00e3 ho\u00e0n th\u00e0nh!';
-      document.getElementById('bm-push-fail').value        = '\u26a0\ufe0f Push th\u1ea5t b\u1ea1i \u0111\u1ebfn <b>{site_domain}</b>\n\u274c {error_reason}';
-      document.getElementById('bm-start-msg').value        = '';
-      document.getElementById('bm-schedule-start').value   = '';
+      if (!confirm('\u0110\u1eb7t v\u1ec1 n\u1ed9i dung m\u1eb7c \u0111\u1ecbnh?')) return;
+      try {
+        var dfl = JSON.parse(document.getElementById('bot-dfl').textContent);
+        var fields = [
+          ['completion-header','completion_header'],
+          ['pending-header','pending_header'],
+          ['vietlott-header','vietlott_header'],
+          ['all-done','all_done'],
+          ['push-fail','push_fail'],
+          ['start-msg','start_msg'],
+          ['schedule-start','schedule_start'],
+        ];
+        fields.forEach(function(f) {
+          var el = document.getElementById('bm-' + f[0]);
+          if (el && dfl[f[1]] !== undefined) el.value = dfl[f[1]];
+        });
+      } catch(e) { alert('L\u1ed7i: ' + e.message); }
     }
     </script>
   `, '<script src="/site-mgr.js"></script><script src="/groq-mgr.js"></script><script src="/groq-seo-mgr.js"></script>'));
