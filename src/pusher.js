@@ -37,7 +37,7 @@ function resolveDrawDate(region) {
   return todayStr;
 }
 
-// ─── Push đến 1 site ───────────────────────────────────────
+// ─── Push đến 1 site — trả về { ok, status, error } ────────
 async function pushToOneSite(domain, secret, endpoint, body) {
   const url = domain.replace(/\/+$/, '') + endpoint;
   try {
@@ -51,21 +51,26 @@ async function pushToOneSite(domain, secret, endpoint, body) {
     });
     clearTimeout(t);
     if (!res.ok) {
-      const txt = await res.text();
-      console.error('[Pusher] HTTP ' + res.status + ' ← ' + url + ': ' + txt.slice(0, 200));
+      const txt = await res.text().catch(() => '');
+      const msg = `HTTP ${res.status} ← ${url}: ${txt.slice(0, 200)}`;
+      console.error('[Pusher] ' + msg);
+      return { ok: false, status: res.status, error: `HTTP ${res.status}: ${txt.slice(0, 80)}` };
     }
-    return res.ok;
+    return { ok: true };
   } catch (e) {
-    console.error('[Pusher] Lỗi → ' + url + ': ' + e.message);
-    return false;
+    const msg = e.name === 'AbortError' ? 'Timeout (8s)' : e.message;
+    console.error('[Pusher] Lỗi → ' + url + ': ' + msg);
+    return { ok: false, status: 0, error: msg };
   }
 }
 
 // ─── Push data đến TẤT CẢ sites song song ──────────────────
-async function pushToWeb(region, results) {
+async function pushToWeb(region, results, onLog) {
   const sites = getSites();
   if (!sites.length) {
-    console.warn('[Pusher] Chưa cấu hình site nào, bỏ qua push.');
+    const msg = 'Chưa cấu hình site nào (thiếu sites[] trong Dashboard)';
+    console.warn('[Pusher] ' + msg);
+    if (onLog) onLog(`[Pusher] ❌ ${msg}`);
     return false;
   }
 
@@ -79,10 +84,25 @@ async function pushToWeb(region, results) {
     })
   );
 
-  const ok  = settled.filter(r => r.status === 'fulfilled' && r.value).length;
-  const all = settled.length;
-  console.log('[Pusher] Xong: ' + ok + '/' + all + ' sites OK');
-  return ok > 0;
+  let okCount = 0;
+  const errors = [];
+  settled.forEach((r, i) => {
+    const dom = sites[i]?.domain || 'site';
+    if (r.status === 'fulfilled' && r.value?.ok) {
+      okCount++;
+    } else {
+      const reason = r.value?.error || r.reason?.message || 'Unknown';
+      errors.push(`${dom}: ${reason}`);
+    }
+  });
+
+  console.log(`[Pusher] Xong: ${okCount}/${settled.length} sites OK`);
+  if (errors.length) {
+    const errMsg = `[Pusher] ❌ Lý do fail: ${errors.join(' | ')}`;
+    console.error(errMsg);
+    if (onLog) onLog(errMsg);
+  }
+  return okCount > 0;
 }
 
 module.exports = { pushToWeb, resolveDrawDate, pushToOneSite };

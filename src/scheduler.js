@@ -102,7 +102,7 @@ async function pollOnce(region, onLog) {
       const total     = results.length;
       onLog(`[${region.toUpperCase()}] 📅 Draw date: ${drawDate} | Cập nhật mới! ${doneCount}/${total} tỉnh xong — push sang web...`);
 
-      const ok = await pushToWeb(region, results);
+      const ok = await pushToWeb(region, results, onLog);
       onLog(ok
         ? `[${region.toUpperCase()}] ✅ Push OK → ${drawDate}`
         : `[${region.toUpperCase()}] ⚠️ Push thất bại`
