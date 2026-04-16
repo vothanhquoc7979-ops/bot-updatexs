@@ -115,7 +115,7 @@ function parseHtml(html, url) {
     .replace(/\s{2,}/g, ' ')
     .trim();
 
-  if (text.length > 5000) text = text.slice(0, 5000) + '...';
+  if (text.length > 4000) text = text.slice(0, 4000) + '...'; // cap input → dành token cho JSON output
 
   // Extract image URLs from original HTML
   const images = [];
@@ -127,7 +127,7 @@ function parseHtml(html, url) {
       images.push(src);
     }
   }
-  const uniqueImages = [...new Set(images)].slice(0, 5);
+  const uniqueImages = [...new Set(images)].slice(0, 6); // lấy tối đa 6 ảnh để inject H2
 
   return { title, description, text, url, images: uniqueImages };
 }
@@ -141,7 +141,7 @@ async function callAI(apiKey, model, systemPrompt, userPrompt, apiBase) {
       { role: 'system', content: systemPrompt },
       { role: 'user',   content: userPrompt   },
     ],
-    max_tokens : 4096,
+    max_tokens : 8192, // đủ cho JSON 1500+ từ HTML (~5000 tokens output)
     temperature: 0.72,
   });
 

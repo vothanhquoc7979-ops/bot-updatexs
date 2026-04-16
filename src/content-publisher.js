@@ -136,6 +136,8 @@ async function publishToSite(site, article) {
       thumbnail_base64 : article.image?.base64   || null,
       thumbnail_ext    : article.image?.ext       || null,
       thumbnail_url    : article.image?.url       || null,
+      // Các URLs ảnh còn lại từ trang gốc (bỏ qua img[0] đã dùng làm thumbnail)
+      source_images    : (article.pageImages || []).slice(1, 6),
       source_url       : article.sourceUrl,
       is_published     : 1,
     }),

@@ -247,6 +247,8 @@ async function start() {
           excerpt,
           slug,
           image,
+          // Tất cả URLs ảnh từ trang nguồn (img[0] là thumbnail, img[1..] inject vào H2)
+          pageImages       : session.pageData.images   || [],
           sourceUrl        : session.url,
           model            : result.model,
           keyName          : result.keyName,
