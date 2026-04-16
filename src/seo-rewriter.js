@@ -137,9 +137,9 @@ async function callAI(apiKey, model, systemPrompt, userPrompt, apiBase) {
   const base = (apiBase || 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
 
   // OpenRouter free tier: TPM limit ~8000 → request (input + max_tokens) phải < 8000
-  // Groq native: không giới hạn ketat → dùng 8192
+  // Groq native free tier: 6000 TPM → giới hạn output 4096 để tổng request < 6000
   const isOpenRouter = model.includes('/');
-  const maxTokens    = isOpenRouter ? 4096 : 8192;
+  const maxTokens    = isOpenRouter ? 4096 : 4096; // 4096 để vừa 6000 TPM
 
   const body = JSON.stringify({
     model,
@@ -164,15 +164,28 @@ async function callAI(apiKey, model, systemPrompt, userPrompt, apiBase) {
   });
 
   if (!res.ok) {
-    const err         = await res.json().catch(() => ({}));
-    const msg         = err?.error?.message || `HTTP ${res.status}`;
-    const isExhausted = res.status === 429
-                     || msg.includes('rate_limit')
-                     || msg.includes('quota')
-                     || msg.includes('Request too large')  // OpenRouter TPM exceeded
-                     || msg.includes('tokens per minute');  // rate limit variant
-    const e           = new Error(`[API] ${msg}`);
-    e.exhausted       = isExhausted;
+    const err  = await res.json().catch(() => ({}));
+    const msg  = err?.error?.message || `HTTP ${res.status}`;
+    const code = err?.error?.code    || '';
+
+    // Quota/billing hết thật → đánh dấu exhausted VĨNH VIỄN
+    const isQuotaExhausted =
+      code === 'insufficient_quota'
+      || msg.includes('insufficient_quota')
+      || msg.includes('payment_required')
+      || res.status === 402;
+
+    // Rate limit tạm thời (TPM/RPM) → KHÔNG mark exhausted, chỉ throw để retry sau
+    const isRateLimit =
+      res.status === 429
+      || code === 'rate_limit_exceeded'
+      || msg.includes('rate_limit')
+      || msg.includes('tokens per minute')
+      || msg.includes('Request too large');
+
+    const e     = new Error(`[API] ${msg}`);
+    e.exhausted = isQuotaExhausted;   // chỉ true khi hết quota thật
+    e.rateLimit = isRateLimit;        // true khi chỉ bị throttle tạm thời
     throw e;
   }
 
@@ -184,9 +197,11 @@ async function callAI(apiKey, model, systemPrompt, userPrompt, apiBase) {
 function buildSeoPrompt(pageData, model) {
   const { title, description, url } = pageData;
 
-  // OpenRouter free tier có input limit thấp → cắt text ngắn hơn
+  // Tính token budget:
+  // Groq free tier: 6000 TPM → input tối đa ~1500 chars text để còn 4096 output tokens
+  // OpenRouter free tier: ~8000 TPM → input tối đa 2000 chars
   const isOpenRouter = (model || '').includes('/');
-  const textCap      = isOpenRouter ? 2000 : 4000;
+  const textCap      = isOpenRouter ? 2000 : 1500; // Giảm xuống để vừa 6000 TPM
   const text         = (pageData.text || '').length > textCap
     ? pageData.text.slice(0, textCap) + '...'
     : (pageData.text || '');
@@ -373,11 +388,19 @@ async function rewriteArticleSEO(pageData, overrideModel) {
     } catch (e) {
       lastError = e;
       if (e.exhausted) {
+        // Quota/billing hết thật → đánh dấu exhausted vĩnh viễn, thử key tiếp
         storage.markGroqKeyExhausted(keyObj.name);
-        console.log(`[SEO-Rewriter] Key "${keyObj.name}" hết quota → thử key tiếp...`);
+        console.log(`[SEO-Rewriter] Key "${keyObj.name}" hết quota billing → thử key tiếp...`);
         continue;
       }
-      throw e;
+      if (e.rateLimit) {
+        // Rate limit tạm thời (TPM/RPM) → KHÔNG mark exhausted, throw ngay để user biết
+        console.log(`[SEO-Rewriter] Key "${keyObj.name}" bị rate limit tạm thời: ${e.message}`);
+        // Thử key tiếp nếu còn (nhiều key thì rotate)
+        lastError = e;
+        continue;
+      }
+      throw e; // Lỗi khác (network, timeout) → throw ngay
     }
   }
 
