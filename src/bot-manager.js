@@ -23,8 +23,11 @@ async function start() {
   const bot = new Telegraf(token);
 
   // ── Commands ─────────────────────────────────────────
-  const { start: schedStart, stop: schedStop, stopAll, getStatus, getCurrentData } = require('./scheduler');
+  const { start: schedStart, stop: schedStop, stopAll, getStatus, getCurrentData, setNotifyFn } = require('./scheduler');
   const { REGION_NAMES } = require('./config');
+
+  // Đăng ký tgLog làm notification callback → báo Telegram khi miền xổ xong
+  setNotifyFn(tgLog);
 
   function tgLog(msg) {
     logger.log(msg);

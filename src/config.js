@@ -59,4 +59,46 @@ module.exports = {
     GL: 'Gia Lai',     NT: 'Ninh Thuận',   DNO: 'Đắk Nông',
     QNG: 'Quảng Ngãi', KT: 'Kon Tum',
   },
+
+  // Lịch tỉnh theo ngày (0=CN, 1=T2 ... 6=T7)
+  PROVINCE_SCHEDULE: {
+    mn: {
+      1: ['TP. HCM', 'Đồng Tháp', 'Cà Mau'],
+      2: ['Bến Tre', 'Vũng Tàu', 'Bạc Liêu'],
+      3: ['Đồng Nai', 'Cần Thơ', 'Sóc Trăng'],
+      4: ['Tây Ninh', 'An Giang', 'Bình Thuận'],
+      5: ['Vĩnh Long', 'Bình Dương', 'Trà Vinh'],
+      6: ['TP. HCM', 'Long An', 'Bình Phước', 'Hậu Giang'],
+      0: ['Tiền Giang', 'Kiên Giang', 'Đà Lạt'],
+    },
+    mt: {
+      1: ['Thừa Thiên Huế', 'Phú Yên'],
+      2: ['Đắk Lắk', 'Quảng Nam'],
+      3: ['Đà Nẵng', 'Khánh Hòa'],
+      4: ['Bình Định', 'Quảng Bình', 'Quảng Trị'],
+      5: ['Gia Lai', 'Ninh Thuận'],
+      6: ['Đắk Nông', 'Quảng Ngãi', 'Đà Nẵng'],
+      0: ['Khánh Hòa', 'Kon Tum'],
+    },
+    mb: {
+      0: ['Hà Nội'], 1: ['Hà Nội'], 2: ['Hà Nội'],
+      3: ['Hà Nội'], 4: ['Hà Nội'], 5: ['Hà Nội'], 6: ['Hà Nội'],
+    },
+  },
+
+  // Lịch Vietlott theo ngày (0=CN, 1=T2 ... 6=T7)
+  VIETLOTT_SCHEDULE: {
+    mega  : [1, 3, 5],   // T2, T4, T6
+    power : [2, 4, 6],   // T3, T5, T7
+    max3d : [1, 3, 5],
+    max3dpro: [1, 3, 5],
+  },
+
+  // Tên game Vietlott
+  VIETLOTT_NAMES: {
+    mega    : 'Mega 6/45',
+    power   : 'Power 6/55',
+    max3d   : 'Max 3D',
+    max3dpro: 'Max 3D Pro',
+  },
 };
