@@ -81,6 +81,52 @@ async function fetchImageBase64(url) {
   } catch (_) { return null; }
 }
 
+// ── Validate từng URL ảnh trước khi publish ───────────────────────────
+// HEAD request → kiểm tra status 200 + Content-Type là image/*
+// Chằn link chết / 403 / HTML error pages trước khi gửi sang PHP
+async function validateImageUrls(urls) {
+  if (!urls || urls.length === 0) return [];
+  const results = await Promise.allSettled(
+    urls.map(async (url) => {
+      const ctrl  = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const res = await fetch(url, {
+          method : 'HEAD',
+          signal : ctrl.signal,
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Bot/1.0)', 'Accept': 'image/*' },
+        });
+        clearTimeout(timer);
+        const ct = (res.headers.get('content-type') || '').split(';')[0].trim();
+        if (res.ok && ct.startsWith('image/')) return url;
+        // Một số server không hỗ trợ HEAD → thử GET range nhỏ
+        if (res.status === 405 || res.status === 501) {
+          const ctrl2  = new AbortController();
+          const timer2 = setTimeout(() => ctrl2.abort(), 8000);
+          const res2   = await fetch(url, {
+            signal : ctrl2.signal,
+            headers: { 'User-Agent': 'Mozilla/5.0', 'Range': 'bytes=0-255' },
+          });
+          clearTimeout(timer2);
+          const ct2 = (res2.headers.get('content-type') || '').split(';')[0].trim();
+          return (res2.ok || res2.status === 206) && ct2.startsWith('image/') ? url : null;
+        }
+        return null;
+      } catch (_) {
+        clearTimeout(timer);
+        return null;
+      }
+    })
+  );
+  const valid = results
+    .filter(r => r.status === 'fulfilled' && r.value)
+    .map(r => r.value);
+  if (valid.length < urls.length) {
+    console.log(`[validateImageUrls] Loại ${urls.length - valid.length}/${urls.length} ảnh lỗi`);
+  }
+  return valid;
+}
+
 // ── Slugify tiêu đề tiếng Việt ───────────────────────────────────────────────
 function slugify(str) {
   return str
@@ -117,13 +163,7 @@ function extractExcerpt(html) {
 async function publishToSite(site, article) {
   // article = { title, slug, html, excerpt, seoTitle, metaDescription, focusKeyword, keywords, categoryId, image, sourceUrl }
   const url = `${site.domain.replace(/\/$/, '')}/api/bot/publish.php`;
-  const res = await fetch(url, {
-    method : 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Bot-Secret' : site.secret,
-    },
-    body: JSON.stringify({
+  const body = {
       title            : article.title,
       slug             : article.slug,
       content          : article.html,
@@ -136,11 +176,24 @@ async function publishToSite(site, article) {
       thumbnail_base64 : article.image?.base64   || null,
       thumbnail_ext    : article.image?.ext       || null,
       thumbnail_url    : article.image?.url       || null,
-      // Các URLs ảnh còn lại từ trang gốc (bỏ qua img[0] đã dùng làm thumbnail)
-      source_images    : (article.pageImages || []).slice(1, 6),
       source_url       : article.sourceUrl,
       is_published     : 1,
-    }),
+  };
+
+  // Validate từng image URL trước khi gửi sang PHP
+  // Loai bỏ link chết / 403 / không phải ảnh → tải trọn vẹn trên server
+  const rawImages    = (article.pageImages || []).slice(1, 6);
+  body.source_images = rawImages.length > 0
+    ? await validateImageUrls(rawImages)
+    : [];
+
+  const res = await fetch(url, {
+    method : 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bot-Secret' : site.secret,
+    },
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
@@ -154,6 +207,7 @@ module.exports = {
   fetchCategories,
   extractImages,
   fetchImageBase64,
+  validateImageUrls,
   slugify,
   extractTitle,
   extractExcerpt,
