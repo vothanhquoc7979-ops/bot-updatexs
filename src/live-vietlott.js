@@ -313,4 +313,4 @@ function startLiveVietlottDaemon(onLog) {
     }, 30000); // Check mỗi 30 giây xem đã tới khung giờ live chưa
 }
 
-module.exports = { startLiveVietlottDaemon };
+module.exports = { startLiveVietlottDaemon, pollLiveKetquaPlus, tryFetchJackpotStatic };

@@ -192,6 +192,23 @@ router.post('/api/control', requireAuth, express.json(), (req, res) => {
   }
 });
 
+// ── POST /api/poll-vietlott ──────────────────────────────
+router.post('/api/poll-vietlott', requireAuth, express.json(), async (req, res) => {
+  const { game } = req.body;  // game = 'power655' | 'mega645' | 'all'
+  try {
+    const { pollLiveKetquaPlus, tryFetchJackpotStatic } = require('./live-vietlott');
+    const games = (game === 'all' || !game)
+      ? ['power655', 'mega645']
+      : [game];
+    const logs = [];
+    const log = msg => { logs.push(msg); logger.log(msg); };
+    await Promise.allSettled(games.map(g => pollLiveKetquaPlus(g, log)));
+    res.json({ ok: true, logs });
+  } catch (e) {
+    res.json({ ok: false, msg: e.message });
+  }
+});
+
 // ── POST /api/save-config ─────────────────────────────────
 router.post('/api/save-config', requireAuth, express.json(), async (req, res) => {
   try {
@@ -636,9 +653,11 @@ router.get('/', requireAuth, (req, res) => {
               </div>
             </div>
             <div class="sep"></div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
               <button class="btn btn-green" onclick="ctrl('start','all')">▶▶ Chạy tất cả</button>
               <button class="btn btn-primary" onclick="ctrl('stop','all')">⏹ Dừng tất cả</button>
+              <button class="btn btn-blue" onclick="pollVietlott()" id="btn-poll-vl" title="Gọi ngay API Vietlott để lấy số + jackpot">🔗 Gọi API Vietlott</button>
+              <span id="poll-vl-msg" style="font-size:12px;color:var(--muted)"></span>
             </div>
           </div>
         </div>
@@ -1091,27 +1110,6 @@ router.get('/', requireAuth, (req, res) => {
         <div class="card" style="margin-top:16px">
           <div class="card-hd">📊 Tiến trình</div>
           <div class="card-body">
-            <div id="crawl-progress" style="display:none">
-              <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
-                <span id="prog-label">Đang crawl...</span>
-                <span id="prog-count">0 / 0</span>
-              </div>
-              <div style="background:#111320;border-radius:6px;height:8px;overflow:hidden">
-                <div id="prog-bar" style="background:linear-gradient(90deg,#e74c3c,#f39c12);height:100%;width:0%;transition:width .3s;border-radius:6px"></div>
-              </div>
-            </div>
-            <div id="crawl-summary" style="display:none;margin-top:10px;font-size:14px;font-weight:600"></div>
-          </div>
-        </div>
-
-        <!-- Kết quả kiểm tra dữ liệu thiếu -->
-        <div class="card" id="card-missing" style="margin-top:16px;display:none">
-          <div class="card-hd">🔍 Kết quả kiểm tra dữ liệu thiếu</div>
-          <div class="card-body" id="missing-results" style="font-size:13px;line-height:1.8">
-            <span style="color:var(--muted)">Ang kiểm tra...</span>
-          </div>
-        </div>
-
         <!-- Log -->
         <div class="card" style="margin-top:16px">
           <div class="card-hd">📋 Log kết quả</div>
@@ -1186,20 +1184,40 @@ router.get('/', requireAuth, (req, res) => {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
-    // ── Control ─────────────────────────────────────────
+    // ── Control ───────────────────────
     async function ctrl(action, region) {
       const r = await fetch('/api/control', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action, region}) });
       const d = await r.json();
       flash(d.msg || (d.ok ? 'OK' : 'Lỗi'), d.ok);
     }
 
-    // ── Clear logs ──────────────────────────────────────
+    // ── Clear logs ──────────────────────────────
     async function clearLogs() {
       await fetch('/api/control', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'clear_logs'}) });
       document.getElementById('logbox').innerHTML = '';
     }
 
-    // ── Flash message ────────────────────────────────────
+    // ── Gọi API Vietlott thủ công ────────────────────────
+    async function pollVietlott() {
+      const btn = document.getElementById('btn-poll-vl');
+      const msg = document.getElementById('poll-vl-msg');
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang gọi...';
+      msg.textContent = '';
+      try {
+        const r = await fetch('/api/poll-vietlott', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({game:'all'}) });
+        const d = await r.json();
+        if (d.ok) { msg.style.color='#4caf50'; msg.textContent='✅ Đã gọi! Xem log bên dưới.'; }
+        else       { msg.style.color='#ef5350'; msg.textContent='❌ '+(d.msg||'Lỗi'); }
+      } catch(e) { msg.style.color='#ef5350'; msg.textContent='❌ '+e.message; }
+      finally {
+        btn.disabled = false;
+        btn.textContent = '🔗 Gọi API Vietlott';
+        setTimeout(() => { msg.textContent=''; }, 6000);
+      }
+    }
+
+    // ── Flash message ──────────────────────────────
     function flash(msg, ok = true) {
       const el = document.getElementById('flash');
       el.textContent = (ok ? '✅ ' : '❌ ') + msg;
@@ -1209,7 +1227,7 @@ router.get('/', requireAuth, (req, res) => {
       flash._t = setTimeout(() => { el.style.display = 'none'; }, 4000);
     }
 
-    // ── Save config form ─────────────────────────────────
+        // ── Save config form ─────────────────────────────────
     document.getElementById('cfg-form').addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);
