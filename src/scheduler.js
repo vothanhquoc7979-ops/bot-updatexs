@@ -231,15 +231,25 @@ function startAutoSchedule(onLog) {
              s.timer = null;
              return;
           }
-          const cfg = storage.load();
+          const cfg   = storage.load();
           const today = new Date().toISOString().split('T')[0];
+
+          // Resolve PHP proxy URL: ưu tiên legacy fields, fallback về sites[0]
+          const sites       = storage.getSites();
+          const phpProxyUrl = cfg.php_server_url
+                           || (sites.length > 0 ? sites[0].domain.replace(/\/+$/, '') + '/api/crawl-save.php' : '');
+          const phpPushSecret = (cfg.php_push_secret || '').trim()
+                             || (sites.length > 0 ? sites[0].secret : '');
+
+          if (!phpProxyUrl || !phpPushSecret) return; // chưa cấu hình → bỏ qua
+
           try {
             const res = await crawl({
               games: [game],
               from: today,
               to: today,
-              phpProxyUrl: cfg.php_server_url,
-              phpPushSecret: cfg.php_push_secret,
+              phpProxyUrl,
+              phpPushSecret,
               onLog
             });
             if (res.saved > 0) {
