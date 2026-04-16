@@ -53,7 +53,7 @@ async function start() {
 
   bot.command('start', ctx => ctx.reply(
     '🎰 <b>KQXS Live Bot</b>\n\n' +
-    '📊 <b>Crawl & Xổ số:</b>\n' +
+    '📊 <b>Crawl &amp; Xổ số:</b>\n' +
     '/chay mb|mn|mt|all — Poll KQXS\n' +
     '/dung [mb|mn|mt] — Dừng poll\n' +
     '/xem mb|mn|mt — Xem KQ\n' +
@@ -65,9 +65,11 @@ async function start() {
     '/danhmuc [số] — Chọn danh mục\n' +
     '/upbai — Đăng bài lên tất cả sites\n' +
     '/cancelbai — Hủy phiên làm việc\n\n' +
-    '🤖 <b>AI Model:</b>\n' +
+    '🤖 <b>AI Model &amp; Keys:</b>\n' +
     '/model — Xem danh sách models\n' +
-    '/setmodel [số] — Đổi model AI',
+    '/setmodel [số] — Đổi model AI\n' +
+    '/keys — Kiểm tra trạng thái Groq keys\n' +
+    '/resetgroq — Reset tất cả exhausted keys',
     { parse_mode: 'HTML' }
   ));
 
@@ -117,6 +119,46 @@ async function start() {
       { parse_mode: 'HTML' }
     );
     logger.log(`[setmodel] Đã đổi model → ${m.id}`);
+  });
+
+  // ── /keys — Xem trạng thái Groq keys ────────────────────────────────────
+  bot.command('keys', ctx => {
+    const cfg  = storage.load();
+    const keys = Array.isArray(cfg.groq_keys) ? cfg.groq_keys : [];
+    if (keys.length === 0) {
+      return ctx.reply('❌ Chưa có Groq API key nào!\n\n👉 Vào Dashboard → mục Groq Keys để thêm key.');
+    }
+    const list = keys.map((k, i) => {
+      const icon = k.exhausted ? '🔴 [HẾT TOKEN]' : '🟢 [OK]';
+      return `${i + 1}. ${icon} <b>${k.name}</b>\n   <code>${k.key.slice(0, 8)}...${k.key.slice(-4)}</code>`;
+    }).join('\n\n');
+    const exhaustedCount = keys.filter(k => k.exhausted).length;
+    ctx.reply(
+      `🔑 <b>Groq API Keys (${keys.length} keys)</b>\n\n${list}\n\n` +
+      (exhaustedCount > 0
+        ? `⚠️ ${exhaustedCount} key đang bị khóa (exhausted)\n👉 Gõ <code>/resetgroq</code> để reset`
+        : '✅ Tất cả keys đều hoạt động'),
+      { parse_mode: 'HTML' }
+    );
+  });
+
+  // ── /resetgroq — Reset tất cả exhausted Groq keys ───────────────────────
+  bot.command('resetgroq', ctx => {
+    const cfg  = storage.load();
+    const keys = Array.isArray(cfg.groq_keys) ? cfg.groq_keys : [];
+    if (keys.length === 0) {
+      return ctx.reply('❌ Chưa có Groq API key nào để reset.\n👉 Vào Dashboard để thêm key.');
+    }
+    const resetCount = keys.filter(k => k.exhausted).length;
+    const resetKeys  = keys.map(k => ({ ...k, exhausted: false }));
+    storage.save({ groq_keys: resetKeys });
+    logger.log(`[resetgroq] Reset ${resetCount} exhausted keys`);
+    ctx.reply(
+      resetCount > 0
+        ? `✅ <b>Đã reset ${resetCount} key!</b>\n\nTất cả keys đã sẵn sàng. Thử <code>/link [url]</code> lại nhé.`
+        : `ℹ️ Không có key nào cần reset. Tất cả keys đều đang hoạt động.`,
+      { parse_mode: 'HTML' }
+    );
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -267,22 +309,34 @@ async function start() {
       previewId,
       image,
     });
-
     // Build preview links
     const pub  = botPublicUrl();
     const lines = articles.map((a, idx) => {
       const dom = a.site?.domain.replace(/^https?:\/\//, '') || 'site';
-      if (a.error) return `❌ Site ${a.siteIdx + 1} (${dom}): ${a.error}`;
+      if (a.error) {
+        // Error message thân thiện hơn cho lỗi API key
+        let errMsg = a.error;
+        if (errMsg.includes('API key') || errMsg.includes('exhausted') || errMsg.includes('khả dụng')) {
+          errMsg += '\n   👉 Gõ /keys để kiểm tra, /resetgroq để reset';
+        } else if (errMsg.includes('rate_limit') || errMsg.includes('Rate limit') || errMsg.includes('tokens per minute')) {
+          errMsg = '⏳ Rate limit — đợi 1 phút rồi thử lại /link';
+        }
+        return `❌ Site ${a.siteIdx + 1} (${dom}):\n   ${errMsg}`;
+      }
       const previewUrl = pub ? `${pub}/preview/${previewId}/${idx}` : '(preview không khả dụng — thiếu BOT_PUBLIC_URL)';
       return `${idx + 1}. 🌐 <b>${dom}</b>\n` +
              `   📂 ${a.category?.name || a.category?.id}\n` +
              `   🔗 <a href="${previewUrl}">Xem trước bài viết</a>`;
     }).join('\n\n');
 
+    const okCount = articles.filter(a => !a.error).length;
+    const footer  = okCount > 0
+      ? '👉 Xem trước, nếu ổn thì gõ: /upbai\n❌ Hủy: /cancelbai'
+      : '👉 Gõ /keys để kiểm tra API keys, /resetgroq để reset nếu cần.';
+
     await editProgress(ctx, progressMsg.message_id,
-      `✅ <b>Đã tạo xong ${articles.filter(a => !a.error).length}/${total} bài!</b>\n\n` +
-      `${lines}\n\n` +
-      `👉 Xem trước, nếu ổn thì gõ: /upbai\n❌ Hủy: /cancelbai`
+      `${okCount > 0 ? '✅' : '⚠️'} <b>Xong ${okCount}/${total} bài!</b>\n\n` +
+      `${lines}\n\n${footer}`
     );
   }
 
