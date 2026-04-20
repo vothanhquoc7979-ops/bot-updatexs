@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ui.js — Express Web Dashboard cho bot admin
  * Truy cập: https://your-service.up.railway.app
  * Đăng nhập bằng ADMIN_PASSWORD (env var)
@@ -1300,13 +1300,12 @@ router.get('/', requireAuth, (req, res) => {
       }
       if (!from || !to) { alert('Vui lòng chọn khoảng ngày!'); return; }
       if (!targetSites.length) {
-        if (!confirm('Chưa chọn website nào!\nBấm OK để dùng site đầu tiên, Cancel để chọn lại.')) return;
+        if (!confirm('Chua chon website nao. Bam OK = dung site dau, Cancel = chon lai.')) return;
       }
 
-      const btn = document.getElementById('btn-crawl');
+      var btn = document.getElementById('btn-crawl');
       btn.disabled = true;
-      btn.textContent = '⏳ Đang crawl...';
-
+      btn.textContent = 'Dang crawl...';
       const box = document.getElementById('crawl-logbox');
       box.innerHTML = '';
 
