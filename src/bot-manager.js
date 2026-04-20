@@ -23,7 +23,7 @@ async function start() {
   const bot = new Telegraf(token);
 
   // ── Commands ─────────────────────────────────────────
-  const { start: schedStart, stop: schedStop, stopAll, getStatus, getCurrentData, setNotifyFn } = require('./scheduler');
+  const { start: schedStart, stop: schedStop, stopAll, getStatus, getCurrentData, setNotifyFn, startMorningSchedule } = require('./scheduler');
   const { REGION_NAMES } = require('./config');
 
   // Đăng ký tgLog làm notification callback → báo Telegram khi miền xổ xong
@@ -598,12 +598,14 @@ async function start() {
     logger.log('✅ Telegram Bot đã khởi động');
     botInstance = bot;
 
-    // Bật auto-schedule
+    // Bật auto-schedule và morning summary
     const cfg = storage.load();
     if (cfg.auto_schedule !== false) {
       const { startAutoSchedule } = require('./scheduler');
       startAutoSchedule(tgLog);
     }
+    // Morning schedule luôn chạy (chỉ skip khi cfg.auto_schedule === false bên trong hàm)
+    startMorningSchedule(tgLog);
   } catch (e) {
     logger.log(`❌ Không thể khởi động bot: ${e.message}`);
     botInstance = null;

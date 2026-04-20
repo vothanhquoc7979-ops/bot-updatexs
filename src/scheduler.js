@@ -18,7 +18,7 @@ const vietlottState = {
   max3dpro: { doneForToday: false, timer: null },
 };
 
-// ─── Callback thông báo khi một miền xong ──────────────────────
+// ─── Callback thông báo Telegram (dùng cho morning summary) ───
 let notifyFn = null;
 function setNotifyFn(fn) { notifyFn = fn; }
 
@@ -115,9 +115,7 @@ async function pollOnce(region, onLog) {
 
       // Kiểm tra xổ xong hoàn toàn
       if (isRegionComplete(results)) {
-        const notice = buildCompletionNotice(region, results);
         onLog(`[${region.toUpperCase()}] 🏁 ${REGION_NAMES[region]} đã xổ xong ngày ${drawDate}!`);
-        if (notifyFn) notifyFn(notice);
         stop(region, onLog);
       }
     } else {
@@ -171,59 +169,73 @@ function stopAll(onLog) {
   });
 }
 
-// ─── Build thông báo Telegram khi 1 miền hoàn thành ───────
-function buildCompletionNotice(doneRegion, results) {
+// ─── Build thông báo sáng: hôm nay xổ đài gì, loại gì ─────────
+function buildMorningSummary() {
   const tz     = 'Asia/Ho_Chi_Minh';
   const now    = new Date();
   const dowIdx = new Date(now.toLocaleDateString('sv-SE', { timeZone: tz })).getDay();
+  const todayFmt = now.toLocaleDateString('vi-VN', { timeZone: tz, weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
 
-  // Lấy template từ storage (nếu admin đã tùy chỉnh)
-  const storage = require('./storage');
-  const cfg     = storage.load();
-  const tpl     = cfg.bot_messages || {};
+  const DAY_NAMES = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
 
-  const T = {
-    completion_header: tpl.completion_header || '✅ <b>Xổ Số {region_done}</b> đã cập nhật trực tiếp và đầy đủ Full số thành công!',
-    pending_header   : tpl.pending_header    || '⏳ <b>Các hàng còn đợi:</b>',
-    vietlott_header  : tpl.vietlott_header   || '🎰 <b>Vietlott</b> (18:00 - 18:30)',
-    all_done         : tpl.all_done          || '🏆 Tất cả cuộc xổ hôm nay đã hoàn thành!',
-  };
+  let msg = `🌅 <b>LỊCH XỔ SỐ HÔM NAY — ${DAY_NAMES[dowIdx]}</b>\n`;
+  msg    += `📅 ${todayFmt}\n`;
+  msg    += '─'.repeat(28) + '\n\n';
 
-  // --- Phần đã xong ---
-  const doneProvinces = results.map(r => `  • ${r.province}`).join('\n');
-  let msg  = T.completion_header.replace('{region_done}', REGION_NAMES[doneRegion]) + '\n';
-  msg     += doneProvinces + '\n';
+  // ── Xổ số 3 miền ──
+  const regionInfo = [
+    { key: 'mn', icon: '🟢', name: 'Miền Nam',   time: '16:00' },
+    { key: 'mt', icon: '🔵', name: 'Miền Trung', time: '17:00' },
+    { key: 'mb', icon: '🔴', name: 'Miền Bắc',   time: '18:15' },
+  ];
 
-  // --- Các miền còn chờ ---
-  const pendingRegions = [];
-  for (const r of ['mn', 'mt', 'mb']) {
-    if (r === doneRegion) continue;
-    const todayProvinces = (PROVINCE_SCHEDULE[r] || {})[dowIdx] || [];
-    if (todayProvinces.length === 0) continue;
-    pendingRegions.push({ region: r, provinces: todayProvinces, running: !!state[r]?.running });
+  for (const { key, icon, name, time } of regionInfo) {
+    const provinces = (PROVINCE_SCHEDULE[key] || {})[dowIdx] || [];
+    if (provinces.length === 0) continue;
+    msg += `${icon} <b>Xổ Số ${name}</b> — ${time}\n`;
+    msg += provinces.map(p => `  • ${p}`).join('\n') + '\n\n';
   }
-  const pendingVietlott = [];
+
+  // ── Vietlott ──
+  const todayVietlott = [];
   for (const [game, days] of Object.entries(VIETLOTT_SCHEDULE)) {
-    if (!days.includes(dowIdx)) continue;
-    if (vietlottState[game]?.doneForToday) continue;
-    pendingVietlott.push(VIETLOTT_NAMES[game] || game);
+    if (days.includes(dowIdx)) {
+      todayVietlott.push(VIETLOTT_NAMES[game] || game);
+    }
+  }
+  if (todayVietlott.length > 0) {
+    msg += `🎰 <b>Vietlott</b> — 18:00\n`;
+    msg += todayVietlott.map(g => `  • ${g}`).join('\n') + '\n\n';
   }
 
-  if (pendingRegions.length > 0 || pendingVietlott.length > 0) {
-    msg += '\n' + T.pending_header + '\n';
-    for (const pr of pendingRegions) {
-      const icon = pr.running ? '🔴' : '⏳';
-      msg += `\n${icon} <b>Xổ Số ${REGION_NAMES[pr.region]}</b>\n`;
-      msg += pr.provinces.map(p => `  • ${p}`).join('\n') + '\n';
-    }
-    if (pendingVietlott.length > 0) {
-      msg += '\n' + T.vietlott_header + '\n';
-      msg += pendingVietlott.map(g => `  • ${g}`).join('\n') + '\n';
-    }
-  } else {
-    msg += '\n' + T.all_done;
-  }
+  msg += '🤖 <i>Bot sẽ tự động lấy kết quả đúng giờ!</i>';
   return msg.trim();
+}
+
+// ─── Gửi thông báo buổi sáng 1 lần/ngày lúc ~07:00 ─────────────
+function startMorningSchedule(onLog) {
+  const storage = require('./storage');
+  let lastSentDate = null;
+
+  setInterval(() => {
+    const cfg = storage.load();
+    if (cfg.auto_schedule === false) return; // Tắt auto thì bỏ qua
+
+    const now = new Date();
+    const vnTime = now.toLocaleTimeString('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+    const todayStr = now.toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' });
+
+    // Gửi lúc 07:00 - 07:05, mỗi ngày chỉ 1 lần
+    if (vnTime >= '07:00' && vnTime <= '07:05' && lastSentDate !== todayStr) {
+      lastSentDate = todayStr;
+      const msg = buildMorningSummary();
+      onLog('[Morning] 🌅 Gửi lịch xổ ngày mới lên Telegram');
+      if (notifyFn) notifyFn(msg);
+    }
+  }, 60 * 1000); // Check mỗi 1 phút
 }
 
 // ─── Status hiện tại ──────────────────────────────────────
@@ -333,4 +345,4 @@ function getCurrentData(region) {
   return state[region]?.lastData || null;
 }
 
-module.exports = { start, stop, stopAll, getStatus, startAutoSchedule, getCurrentData, setNotifyFn };
+module.exports = { start, stop, stopAll, getStatus, startAutoSchedule, startMorningSchedule, getCurrentData, setNotifyFn };
