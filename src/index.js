@@ -34,9 +34,31 @@ app.use(ui);
 // ── Health check ─────────────────────────────────────────
 app.get('/health', (_, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
-// ── Helper: resolve PHP proxy URL + Secret ────────────────
-// Ưu tiên legacy fields (php_server_url / php_push_secret);
-// fallback về sites[0] nếu legacy trống (cấu hình qua Dashboard mới)
+// ── Helper: lấy danh sách tất cả sites đã cài đặt ──────────────────────────────────
+function getAllSites() {
+  const cfg = storage.load();
+  const sites = storage.getSites();
+  // Số cũ: legacy php_server_url / php_push_secret
+  if (sites.length === 0 && cfg.php_server_url && (cfg.php_push_secret || '').trim()) {
+    return [{ domain: cfg.php_server_url.replace(/\/api\/crawl-save\.php.*$/, ''), secret: (cfg.php_push_secret || '').trim() }];
+  }
+  return sites;
+}
+
+// ── Lấy mảng target sites theo index (hoặc tất cả nếu không truyền) ─────────
+function resolveCrawlTargets(targetSiteIndices) {
+  const all = getAllSites();
+  if (!all.length) return [];
+  if (!Array.isArray(targetSiteIndices) || targetSiteIndices.length === 0) {
+    // Không chọn gì = dùng site đầu tiên (backward compat)
+    return [all[0]];
+  }
+  return targetSiteIndices
+    .map(i => all[i])
+    .filter(Boolean);
+}
+
+// Legacy wrapper (giự cho các chỗ khác dùng)
 function resolveCrawlProxy() {
   const cfg = storage.load();
   if (cfg.php_server_url && (cfg.php_push_secret || '').trim()) {
@@ -52,56 +74,58 @@ function resolveCrawlProxy() {
   return { url: '', secret: '' };
 }
 
-// ── API: Crawl Vietlott ─────────────────────────────────
+// ── API: Crawl Vietlott ───────────────────────────────
 app.post('/api/crawler/vietlott', ui.requireAuth, async (req, res) => {
-  const { url: phpProxyUrl, secret: phpSecret } = resolveCrawlProxy();
-  const useProxy = !!(phpProxyUrl && phpSecret);
-
-  if (!useProxy) {
-    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret! Vào Dashboard → thêm site hoặc điền PHP Server URL.' });
-  }
-
-  logger.log(`[Crawl Vietlott] mode=PHP_PROXY url=${phpProxyUrl || 'N/A'}`);
-
-  const { games = [], from, to, force = false } = req.body;
+  const { games = [], from, to, force = false, targetSites: tsParam } = req.body;
 
   if (!games.length || !from || !to) {
     return res.status(400).json({ ok: false, msg: 'Thiếu games / from / to' });
   }
-
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-    return res.status(400).json({ ok: false, msg: 'Ngày không hợp lệ (định dạng YYYY-MM-DD)' });
+    return res.status(400).json({ ok: false, msg: 'Ngày không hợp lệ (YYYY-MM-DD)' });
   }
+
+  // Xác định danh sách sites cần push
+  const targets = resolveCrawlTargets(Array.isArray(tsParam) ? tsParam : []);
+  if (!targets.length) {
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình site nào! Vào Dashboard → thêm site.' });
+  }
+
+  logger.log(`[Crawl Vietlott] Push tới ${targets.length} site: ` + targets.map(s => s.domain).join(', '));
 
   const { crawl } = require('./crawler-vietlott');
-
   const startTime = Date.now();
   const collectedLogs = [];
+  const onLog = (msg) => { collectedLogs.push({ ts: new Date().toISOString(), msg }); logger.log(msg); };
 
-  try {
-    const result = await crawl({
-      games,
-      from,
-      to,
-      phpProxyUrl: phpProxyUrl,
-      phpPushSecret: useProxy ? phpSecret  : undefined,
-      force,
-      onLog: (msg) => {
-        collectedLogs.push({ ts: new Date().toISOString(), msg });
-        logger.log(msg);
-      },
-    });
+  let totalSaved = 0, totalErrors = 0;
 
-    res.json({
-      ok: true,
-      saved: result.saved,
-      errors: result.errors,
-      elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
-      logs: collectedLogs,
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, msg: e.message, logs: collectedLogs });
-  }
+  // Push song song đến tất cả sites đã chọn
+  const results = await Promise.allSettled(
+    targets.map(site => {
+      const phpProxyUrl = site.domain.replace(/\/+$/, '') + '/api/crawl-save.php';
+      return crawl({ games, from, to, phpProxyUrl, phpPushSecret: site.secret, onLog, force });
+    })
+  );
+
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      totalSaved  += r.value.saved;
+      totalErrors += r.value.errors;
+    } else {
+      totalErrors++;
+      onLog(`❌ Site ${targets[i]?.domain}: ${r.reason?.message || 'Lỗi không xác định'}`);
+    }
+  });
+
+  res.json({
+    ok: true,
+    saved: totalSaved,
+    errors: totalErrors,
+    sites: targets.map(s => s.domain),
+    elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
+    logs: collectedLogs,
+  });
 });
 
 // ── API: Kiểm tra dữ liệu thiếu trong DB ──────────────────
@@ -159,55 +183,56 @@ app.get('/api/check-incomplete', ui.requireAuth, async (req, res) => {
   }
 });
 
-// ── API: Crawl 3 Miền (XSMB, XSMN, XSMT) ─────────────────
+// ── API: Crawl 3 Miền (XSMB, XSMN, XSMT) ─────────────────────
 app.post('/api/crawler/mien', ui.requireAuth, async (req, res) => {
-  const { url: phpProxyUrl, secret: phpSecret } = resolveCrawlProxy();
-  const useProxy = !!(phpProxyUrl && phpSecret);
-
-  if (!useProxy) {
-    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình PHP Server URL và Secret! Vào Dashboard → thêm site hoặc điền PHP Server URL.' });
-  }
-
-  logger.log(`[Crawl 3 Miền] mode=PHP_PROXY url=${phpProxyUrl || 'N/A'}`);
-
-  const { regions = [], from, to } = req.body;
+  const { regions = [], from, to, targetSites: tsParam } = req.body;
 
   if (!regions.length || !from || !to) {
     return res.status(400).json({ ok: false, msg: 'Thiếu regions / from / to' });
   }
-
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-    return res.status(400).json({ ok: false, msg: 'Ngày không hợp lệ (định dạng YYYY-MM-DD)' });
+    return res.status(400).json({ ok: false, msg: 'Ngày không hợp lệ (YYYY-MM-DD)' });
   }
+
+  const targets = resolveCrawlTargets(Array.isArray(tsParam) ? tsParam : []);
+  if (!targets.length) {
+    return res.status(500).json({ ok: false, msg: 'Chưa cấu hình site nào! Vào Dashboard → thêm site.' });
+  }
+
+  logger.log(`[Crawl 3 Miền] Push tới ${targets.length} site: ` + targets.map(s => s.domain).join(', '));
 
   const { crawl } = require('./crawler-3mien');
-
   const startTime = Date.now();
   const collectedLogs = [];
+  const onLog = (msg) => { collectedLogs.push({ ts: new Date().toISOString(), msg }); logger.log(msg); };
 
-  try {
-    const result = await crawl({
-      regions,
-      from,
-      to,
-      phpProxyUrl: phpProxyUrl,
-      phpPushSecret: useProxy ? phpSecret  : undefined,
-      onLog: (msg) => {
-        collectedLogs.push({ ts: new Date().toISOString(), msg });
-        logger.log(msg);
-      },
-    });
+  let totalSaved = 0, totalErrors = 0;
 
-    res.json({
-      ok: true,
-      saved: result.saved,
-      errors: result.errors,
-      elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
-      logs: collectedLogs,
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, msg: e.message, logs: collectedLogs });
-  }
+  const results = await Promise.allSettled(
+    targets.map(site => {
+      const phpProxyUrl = site.domain.replace(/\/+$/, '') + '/api/crawl-save.php';
+      return crawl({ regions, from, to, phpProxyUrl, phpPushSecret: site.secret, onLog });
+    })
+  );
+
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      totalSaved  += r.value.saved;
+      totalErrors += r.value.errors;
+    } else {
+      totalErrors++;
+      onLog(`❌ Site ${targets[i]?.domain}: ${r.reason?.message || 'Lỗi không xác định'}`);
+    }
+  });
+
+  res.json({
+    ok: true,
+    saved: totalSaved,
+    errors: totalErrors,
+    sites: targets.map(s => s.domain),
+    elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s`,
+    logs: collectedLogs,
+  });
 });
 
 // Đã bỏ /api/mysql-check

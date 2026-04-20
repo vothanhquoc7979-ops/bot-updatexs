@@ -99,6 +99,12 @@ ${extraHead}
   .var-chip:hover{background:#2a3555}
   .tgemoji-hint{font-size:11px;color:#5a6080;margin-top:6px}
   .tgemoji-hint code{color:#42a5f5;background:#111830;padding:1px 5px;border-radius:3px;font-size:11px}
+  .domain-check{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:8px 12px;background:#111320;border:1px solid var(--border);border-radius:8px;transition:border-color .2s,background .2s}
+  .domain-check:hover{border-color:var(--accent2)}
+  .domain-check input[type=checkbox]{accent-color:var(--green);width:16px;height:16px;flex-shrink:0}
+  .domain-check .d-name{font-weight:600;color:#e8e8f0;}
+  .domain-check .d-url{font-size:11px;color:var(--muted);}
+  .domain-check input:checked ~ * .d-name{color:#4caf50}
 </style>
 </head>
 <body>
@@ -1062,6 +1068,7 @@ router.get('/', requireAuth, (req, res) => {
       <!-- ═══════════════ TAB: CRAWL DỮ LIỆU ═══════════════ -->
       <div id="panel-crawl" style="display:none">
 
+        <!-- Chọn loại xổ -->
         <div class="card">
           <div class="card-hd">🎯 Chọn loại xổ số cần crawl</div>
           <div class="card-body">
@@ -1071,7 +1078,7 @@ router.get('/', requireAuth, (req, res) => {
             </div>
 
             <!-- 3 Miền -->
-            <p style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">📌 Xổ số 3 Miền (web: xskt.com.vn)</p>
+            <p style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">📌 Xổ số 3 Miền (source: GitHub JSON API)</p>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:16px">
               <label class="game-check"><input type="checkbox" class="mien-cb" value="mb"> 🏛️ XS Miền Bắc (XSMB)</label>
               <label class="game-check"><input type="checkbox" class="mien-cb" value="mn"> 🌴 XS Miền Nam (XSMN)</label>
@@ -1079,7 +1086,7 @@ router.get('/', requireAuth, (req, res) => {
             </div>
 
             <!-- Vietlott -->
-            <p style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">💰 Vietlott (web: kqxs.vn / xosothantai.mobi)</p>
+            <p style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">💰 Vietlott (source: GitHub JSON API)</p>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:14px">
               <label class="game-check"><input type="checkbox" class="game-cb" value="mega"> 🎰 Mega 6/45</label>
               <label class="game-check"><input type="checkbox" class="game-cb" value="power"> ⚡ Power 6/55</label>
@@ -1087,17 +1094,16 @@ router.get('/', requireAuth, (req, res) => {
               <label class="game-check"><input type="checkbox" class="game-cb" value="max3dpro"> 🎲 Max 3D Pro</label>
               <label class="game-check"><input type="checkbox" class="game-cb" value="lotto13h"> 🎫 Lotto 5/35 13H</label>
               <label class="game-check"><input type="checkbox" class="game-cb" value="lotto21h"> 🎫 Lotto 5/35 21H</label>
-
             </div>
 
             <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
               <div class="form-group" style="margin:0">
                 <label>Từ ngày</label>
-                <input type="date" id="crawl-from" class="form-control" value="${new Date().toISOString().slice(0,10)}">
+                <input type="date" id="crawl-from" value="${new Date().toISOString().slice(0,10)}">
               </div>
               <div class="form-group" style="margin:0">
                 <label>Đến ngày</label>
-                <input type="date" id="crawl-to" class="form-control" value="${new Date().toISOString().slice(0,10)}">
+                <input type="date" id="crawl-to" value="${new Date().toISOString().slice(0,10)}">
               </div>
               <button class="btn btn-blue" id="btn-check" onclick="checkMissing()">🔍 Kiểm tra thiếu ngày</button>
               <button class="btn btn-green btn-sm" id="btn-check-inc" onclick="checkIncomplete()">🔧 Kiểm tra số thiếu</button>
@@ -1106,15 +1112,55 @@ router.get('/', requireAuth, (req, res) => {
           </div>
         </div>
 
-        <!-- Progress -->
+        <!-- Chọn Website đích -->
+        <div class="card" style="margin-top:16px">
+          <div class="card-hd">🌐 Chọn Website nhận dữ liệu crawl</div>
+          <div class="card-body">
+            <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
+              Dữ liệu crawl từ GitHub API sẽ được đẩy đến các website đã chọn bên dưới.
+              Mặc định (không chọn gì) = chỉ đẩy đến site đầu tiên.
+            </p>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+              <button class="btn btn-blue btn-sm" onclick="toggleAllDomains(true)">✅ Chọn tất cả</button>
+              <button class="btn btn-gray btn-sm" onclick="toggleAllDomains(false)">❌ Bỏ chọn</button>
+            </div>
+            ${(()=>{
+              const sites = cfg.sites || [];
+              if (sites.length === 0) {
+                return '<div style="color:var(--muted);font-size:13px;padding:10px 0">⚠️ Chưa có site nào. Vào tab Dashboard → thêm site trước.</div>';
+              }
+              return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">
+                ${sites.map((s, i) => `
+                <label class="domain-check">
+                  <input type="checkbox" class="domain-cb" value="${i}" checked>
+                  <div>
+                    <div class="d-name">${s.domain.replace(/^https?:\/\//, '')}</div>
+                    <div class="d-url">${s.domain}</div>
+                  </div>
+                </label>`).join('')}
+              </div>`;
+            })()}
+          </div>
+        </div>
+
+        <!-- Progress & Log -->
         <div class="card" style="margin-top:16px">
           <div class="card-hd">📊 Tiến trình</div>
-          <div class="card-body">
-        <!-- Log -->
-        <div class="card" style="margin-top:16px">
-          <div class="card-hd">📋 Log kết quả</div>
+          <div class="card-body" id="crawl-progress" style="display:none">
+            <div style="background:#111320;border-radius:6px;overflow:hidden;margin-bottom:8px">
+              <div id="prog-bar" style="width:0%;height:8px;background:var(--green);transition:width .3s"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted)">
+              <span id="prog-label">Đang crawl...</span>
+              <span id="prog-count"></span>
+            </div>
+            <div id="crawl-summary" style="display:none;margin-top:8px;font-size:13px"></div>
+          </div>
+          <div class="card-hd" style="border-top:1px solid var(--border)">📋 Log kết quả</div>
           <div class="card-body" style="padding:12px">
-            <div id="crawl-logbox"><span style="color:var(--muted)">Chọn loại xổ → khoảng ngày → bấm Bắt đầu crawl...</span></div>
+            <div id="crawl-logbox" style="background:#080b14;border-radius:8px;padding:12px;height:260px;overflow-y:auto;font-family:monospace;font-size:12px;line-height:1.6;border:1px solid var(--border)">
+              <span style="color:var(--muted)">Chọn loại xổ → chọn website → khoảng ngày → bấm Bắt đầu crawl...</span>
+            </div>
           </div>
         </div>
 
@@ -1124,8 +1170,7 @@ router.get('/', requireAuth, (req, res) => {
 
     <script>
 
-
-    // ── Tab switching ─────────────────────────────────────
+    // ── Tab switching ──────────────────────────────────────────
     function showTab(name) {
       ['dashboard','botmsg','crawl'].forEach(function(t) {
         document.getElementById('panel-' + t).style.display = t === name ? '' : 'none';
@@ -1133,9 +1178,7 @@ router.get('/', requireAuth, (req, res) => {
       });
     }
 
-    // Đã bỏ Javascript checkMySQLStatus và testMysql
-
-    // ── Poll status mỗi 5s ──────────────────────────────
+    // ── Poll status mỗi 5s ─────────────────────────────────────
     async function fetchStatus() {
       try {
         const r = await fetch('/api/status');
@@ -1154,16 +1197,9 @@ router.get('/', requireAuth, (req, res) => {
         if (!key) return;
         const el = document.getElementById(map[key]);
         if (!el) return;
-        if (line.includes('đang poll')) {
-          el.textContent = '🔴 Live';
-          el.className = 'pill pill-on';
-        } else if (line.includes('xong')) {
-          el.textContent = '✅ Xong';
-          el.className = 'pill pill-done';
-        } else {
-          el.textContent = 'Dừng';
-          el.className = 'pill pill-off';
-        }
+        if (line.includes('đang poll')) { el.textContent='🔴 Live'; el.className='pill pill-on'; }
+        else if (line.includes('xong')) { el.textContent='✅ Xong'; el.className='pill pill-done'; }
+        else { el.textContent='Dừng'; el.className='pill pill-off'; }
       });
     }
 
@@ -1175,7 +1211,7 @@ router.get('/', requireAuth, (req, res) => {
         if (l.msg.includes('✅') || l.msg.includes('OK')) cls = 'log-ok';
         else if (l.msg.includes('❌') || l.msg.includes('Lỗi')) cls = 'log-err';
         else if (l.msg.includes('⚠️')) cls = 'log-warn';
-        return \`<div class="\${cls}"><span style="color:#3d4566">\${l.ts}</span> \${escHtml(l.msg)}</div>\`;
+        return '<div class="' + cls + '"><span style="color:#3d4566">' + l.ts + '</span> ' + escHtml(l.msg) + '</div>';
       }).join('');
       if (atBottom) box.scrollTop = box.scrollHeight;
     }
@@ -1184,40 +1220,35 @@ router.get('/', requireAuth, (req, res) => {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
-    // ── Control ───────────────────────
+    // ── Control ──────────────────────────────────────
     async function ctrl(action, region) {
       const r = await fetch('/api/control', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action, region}) });
       const d = await r.json();
       flash(d.msg || (d.ok ? 'OK' : 'Lỗi'), d.ok);
     }
 
-    // ── Clear logs ──────────────────────────────
     async function clearLogs() {
       await fetch('/api/control', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'clear_logs'}) });
       document.getElementById('logbox').innerHTML = '';
     }
 
-    // ── Gọi API Vietlott thủ công ────────────────────────
     async function pollVietlott() {
       const btn = document.getElementById('btn-poll-vl');
       const msg = document.getElementById('poll-vl-msg');
-      btn.disabled = true;
-      btn.textContent = '⏳ Đang gọi...';
+      btn.disabled = true; btn.textContent = '⏳ Đang gọi...';
       msg.textContent = '';
       try {
         const r = await fetch('/api/poll-vietlott', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({game:'all'}) });
         const d = await r.json();
-        if (d.ok) { msg.style.color='#4caf50'; msg.textContent='✅ Đã gọi! Xem log bên dưới.'; }
+        if (d.ok) { msg.style.color='#4caf50'; msg.textContent='✅ Đã gọi!'; }
         else       { msg.style.color='#ef5350'; msg.textContent='❌ '+(d.msg||'Lỗi'); }
       } catch(e) { msg.style.color='#ef5350'; msg.textContent='❌ '+e.message; }
       finally {
-        btn.disabled = false;
-        btn.textContent = '🔗 Gọi API Vietlott';
+        btn.disabled = false; btn.textContent = '🔗 Gọi API Vietlott';
         setTimeout(() => { msg.textContent=''; }, 6000);
       }
     }
 
-    // ── Flash message ──────────────────────────────
     function flash(msg, ok = true) {
       const el = document.getElementById('flash');
       el.textContent = (ok ? '✅ ' : '❌ ') + msg;
@@ -1227,14 +1258,12 @@ router.get('/', requireAuth, (req, res) => {
       flash._t = setTimeout(() => { el.style.display = 'none'; }, 4000);
     }
 
-        // ── Save config form ─────────────────────────────────
     document.getElementById('cfg-form').addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);
       const body = {
         telegram_bot_token: fd.get('telegram_bot_token'),
         telegram_chat_id:   fd.get('telegram_chat_id'),
-        // gemini_api_key removed — now using Groq
         auto_schedule:      fd.get('auto_schedule') === 'true',
       };
       const r = await fetch('/api/save-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -1242,10 +1271,12 @@ router.get('/', requireAuth, (req, res) => {
       flash(d.ok ? 'Đã lưu cấu hình! Bot đang restart...' : (d.msg || 'Lỗi'), d.ok);
     });
 
-
-    // ── Crawl Dữ Liệu ────────────────────────────────────
+    // ── Crawl ──────────────────────────────────────────────────
     function toggleAllMien(checked) {
       document.querySelectorAll('.mien-cb').forEach(cb => { cb.checked = checked; });
+    }
+    function toggleAllDomains(checked) {
+      document.querySelectorAll('.domain-cb').forEach(cb => { cb.checked = checked; });
     }
 
     function appendCrawlLog(msg, color = '#e8e8f0') {
@@ -1258,15 +1289,19 @@ router.get('/', requireAuth, (req, res) => {
     }
 
     async function runCrawl() {
-      const mienChecked  = Array.from(document.querySelectorAll('.mien-cb:checked')).map(cb => cb.value);
+      const mienChecked     = Array.from(document.querySelectorAll('.mien-cb:checked')).map(cb => cb.value);
       const vietlottChecked = Array.from(document.querySelectorAll('.game-cb:checked')).map(cb => cb.value);
-      const from    = document.getElementById('crawl-from').value;
-      const to      = document.getElementById('crawl-to').value;
+      const targetSites     = Array.from(document.querySelectorAll('.domain-cb:checked')).map(cb => parseInt(cb.value, 10));
+      const from = document.getElementById('crawl-from').value;
+      const to   = document.getElementById('crawl-to').value;
 
       if (!mienChecked.length && !vietlottChecked.length) {
         alert('Vui lòng chọn ít nhất 1 loại xổ số!'); return;
       }
       if (!from || !to) { alert('Vui lòng chọn khoảng ngày!'); return; }
+      if (!targetSites.length) {
+        if (!confirm('Chưa chọn website nào!\nBấm OK để dùng site đầu tiên, Cancel để chọn lại.')) return;
+      }
 
       const btn = document.getElementById('btn-crawl');
       btn.disabled = true;
@@ -1294,7 +1329,7 @@ router.get('/', requireAuth, (req, res) => {
           const res = await fetch('/api/crawler/mien', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ regions: mienChecked, from, to }),
+            body: JSON.stringify({ regions: mienChecked, from, to, targetSites }),
           });
           const data = await res.json();
           if (data.ok) {
@@ -1316,7 +1351,7 @@ router.get('/', requireAuth, (req, res) => {
           const res = await fetch('/api/crawler/vietlott', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ games: vietlottChecked, from, to, force: false }),
+            body: JSON.stringify({ games: vietlottChecked, from, to, force: false, targetSites }),
           });
           const data = await res.json();
           if (data.ok) {
